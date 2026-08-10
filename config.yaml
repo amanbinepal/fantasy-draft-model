@@ -1,0 +1,20 @@
+league:
+  platform: sleeper
+  league_id: 1312630302115377152
+  draft_id: 1312630302123790336
+  teams: 10
+  scoring: full_ppr
+  td_bonus_40plus: true
+  roster:
+    QB: 1
+    RB: 2
+    WR: 2
+    TE: 1
+    FLEX: 2
+    BN: 6
+    IR: 2
+  rounds: 14
+
+data:
+  seasons: [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  games_played_definition: stat_line_presence
