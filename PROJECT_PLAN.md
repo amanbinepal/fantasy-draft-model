@@ -31,9 +31,10 @@ fantasy-draft-model/
     scoring.py           # league's exact scoring rules as a function
     features.py           # historical stats -> training table
     model.py                # Ridge regression, per position
-    vbd.py                    # value-based drafting / replacement level
-    sleeper_api.py               # Sleeper API wrapper
-    live_tracker.py                # simple polling loop, draft day
+    ecr_blend.py              # pull + blend FantasyPros consensus rankings
+    vbd.py                      # value-based drafting / replacement level
+    sleeper_api.py                 # Sleeper API wrapper
+    live_tracker.py                  # simple polling loop, draft day
   backtest/
     run_backtest.py
   notebooks/           # exploration, kept messy on purpose
@@ -83,25 +84,45 @@ via `GET /v1/league/<league_id>/drafts` once Sleeper has it scheduled.
 - **Checkpoint:** if someone asked "what's your target variable and
   what would leak into it if you weren't careful," what's your answer?
 
-## Phase 3: Projection model (Day 5-6)
+## Phase 3: Projection model (Day 5-7)
 
 - Ridge regression per position (QB/RB/WR/TE separately, since sample
   sizes are small and position usage patterns differ a lot).
-- Rookies have no NFL history. Decide now: build a separate
-  draft-capital-based heuristic for them, or explicitly scope them out
-  as a known limitation for v1. Either is fine; know which you picked
-  and why.
+- Pull FantasyPros consensus rankings (free API key at
+  fantasypros.com/api-data, or a manually exported cheat-sheet CSV as
+  a fallback). This is the part that knows things your model
+  structurally cannot: training camp news, depth-chart battles,
+  coordinator changes, none of which show up in last season's box
+  scores.
+- Name-matching between FantasyPros and your Sleeper/nfl_data_py
+  player IDs is the fiddly part here. Fuzzy-match on name + team +
+  position, and log anything that doesn't match cleanly rather than
+  silently dropping it.
+- Rookies have no NFL history for the Ridge model to train on, so use
+  FantasyPros' ECR directly for them instead of a heuristic. For
+  veteran players, blend your model's projection with ECR (a simple
+  weighted average is a fine starting point, and worth tuning once you
+  can see backtest results in Phase 4). Know what weighting you picked
+  and why: that's a real modeling decision, not a detail to skip past.
 - Compare against a naive baseline (e.g. last season's points). If
   Ridge doesn't clearly beat naive, that's worth knowing, not hiding.
 - **Checkpoint:** why Ridge (regularization + small samples) instead
   of a more flexible model like XGBoost, for this specific problem?
+  And separately: why blend with ECR instead of trusting either
+  source alone?
 
-## Phase 4: Validation (Day 6-7)
+## Phase 4: Validation (Day 7-8)
 
 - Walk-forward backtest: for each past season, train on prior years,
   predict that season, compare to what actually happened.
+- Run the backtest three ways: your Ridge model alone, ECR alone, and
+  the blend. This is the actual evidence for whether blending helped
+  or just added complexity for nothing, don't skip it and assume the
+  blend is better just because it uses more information.
 - **Checkpoint:** what does "the model beat the baseline X% of the
-  time" actually mean, and what would make you *not* trust that number?
+  time" actually mean, and what would make you *not* trust that
+  number? Which of the three (model, ECR, blend) actually won, and
+  does that match what you expected going in?
 
 ## Phase 5: VBD scoring (Day 7-8)
 
@@ -130,8 +151,6 @@ Stretch, add only if the phases above finish with time to spare:
   hard").
 - Positional-run detection ("3 RBs gone in the last 4 picks league-wide").
 - Auto-refreshing UI instead of a manual refresh button.
-- FantasyPros/expert-ECR blending as a sanity check layered on top of
-  your own model.
 
 If time runs short close to Aug 21, cut stretch items and UI polish
 before cutting anything in "core." A plain-text list with the right
