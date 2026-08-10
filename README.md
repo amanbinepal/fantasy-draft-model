@@ -5,7 +5,7 @@ data science project ahead of my Aug 21, 2026 Sleeper draft.
 
 ## The problem
 
-Snake drafts move fast — roughly 60–90 seconds per pick — and most tools
+Snake drafts move fast (roughly 60-90 seconds per pick) and most tools
 hand you the same generic expert-consensus rankings everyone else at the
 table already has. Those rankings also don't reflect quirks specific to my
 league: a 40+ yard TD bonus and a double-FLEX roster shape that changes who's
@@ -29,7 +29,7 @@ built and validated myself, not a black box.
 This is as much a learning project as a practical one. I wanted to actually
 understand value-based drafting, walk-forward validation, and where a
 from-scratch model beats (or doesn't beat) an off-the-shelf consensus
-ranking — not just consume someone else's number.
+ranking, not just consume someone else's number.
 
 ## Status
 
