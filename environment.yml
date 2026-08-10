@@ -8,6 +8,4 @@ dependencies:
   - numpy
   - pyyaml
   - requests
-  - pip
-  - pip:
-      - nfl_data_py
+  - pyarrow
