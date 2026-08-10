@@ -2,8 +2,9 @@
 
 Draft day: **Aug 21, 2026**. Today: Aug 10. ~11 days, worked in evening
 sessions. Priority: a projection model you actually understand and can
-defend, over a polished live-draft UI. The live tracker is a deliberately
-simple MVP so it doesn't eat the time budget for the model.
+defend, first. The live tracker's UI can stay simple, but its
+recommendation logic (roster-need-aware, not just a raw sorted list) is
+core, not optional. See Phase 6 for exactly what "core" means here.
 
 ## Ground rules for how we build this
 
@@ -110,14 +111,33 @@ via `GET /v1/league/<league_id>/drafts` once Sleeper has it scheduled.
 - **Checkpoint:** why does VBD beat raw projected points for ranking
   across positions? What breaks if you skip it and just sort by points?
 
-## Phase 6: Live tracker MVP (Day 9-10), kept intentionally simple
+## Phase 6: Live tracker (Day 9-10), built to be genuinely useful mid-draft
+
+Core, this is what makes the tool worth having open during the draft:
 
 - `live_tracker.py`: poll `GET /v1/draft/<draft_id>/picks` every 3-5s,
-  diff against last seen picks, remove drafted players from your
-  rankings CSV, print (or a bare Streamlit table with a manual refresh
-  button; skip auto-refresh polish unless Phase 0-5 finished early).
-- This does not need FantasyPros/expert-ECR blending. That's a
-  post-Aug-21 stretch goal if you want to keep improving the repo.
+  diff against last seen picks, remove drafted players from the pool.
+- `recommend.py`: blend the VBD rankings with your roster's current
+  state (which starting slots are already filled) so the tool surfaces
+  the best value at positions you still need, not just best overall.
+- One highlighted "recommended next pick" at the top of the view, not
+  just a sorted list you have to interpret yourself. In a 60-90 second
+  window you want an answer, not raw data to parse.
+
+Stretch, add only if the phases above finish with time to spare:
+
+- Tier-break alerts ("last elite TE on the board, next tier drops off
+  hard").
+- Positional-run detection ("3 RBs gone in the last 4 picks league-wide").
+- Auto-refreshing UI instead of a manual refresh button.
+- FantasyPros/expert-ECR blending as a sanity check layered on top of
+  your own model.
+
+If time runs short close to Aug 21, cut stretch items and UI polish
+before cutting anything in "core." A plain-text list with the right
+recommendation logic beats a pretty dashboard that's just sorting by
+raw points.
+
 - **Checkpoint:** what's your plan if Sleeper's API is briefly
   unreachable mid-draft? Does the tool crash or degrade gracefully?
 
