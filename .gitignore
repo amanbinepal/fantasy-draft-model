@@ -1,0 +1,13 @@
+CLAUDE.local.md
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+.env
+.DS_Store
+.ipynb_checkpoints/
+*.egg-info/
