@@ -1,0 +1,13 @@
+name: fantasy-draft-model
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - pyyaml
+  - requests
+  - pip
+  - pip:
+      - nfl_data_py
