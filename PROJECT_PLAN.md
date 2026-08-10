@@ -132,9 +132,10 @@ via `GET /v1/league/<league_id>/drafts` once Sleeper has it scheduled.
 - **Checkpoint:** why does VBD beat raw projected points for ranking
   across positions? What breaks if you skip it and just sort by points?
 
-## Phase 6: Live tracker (Day 9-10), built to be genuinely useful mid-draft
+## Phase 6: Live tracker (Day 9-11), built to be genuinely useful mid-draft
 
-Core, this is what makes the tool worth having open during the draft:
+Core, all of it, this is what makes the tool worth having open during
+the draft:
 
 - `live_tracker.py`: poll `GET /v1/draft/<draft_id>/picks` every 3-5s,
   diff against last seen picks, remove drafted players from the pool.
@@ -144,23 +145,29 @@ Core, this is what makes the tool worth having open during the draft:
 - One highlighted "recommended next pick" at the top of the view, not
   just a sorted list you have to interpret yourself. In a 60-90 second
   window you want an answer, not raw data to parse.
-
-Stretch, add only if the phases above finish with time to spare:
-
 - Tier-break alerts ("last elite TE on the board, next tier drops off
-  hard").
-- Positional-run detection ("3 RBs gone in the last 4 picks league-wide").
-- Auto-refreshing UI instead of a manual refresh button.
+  hard"). This depends on Phase 5 actually outputting tier labels
+  alongside the VBD score, not just a raw number, so double check that
+  before starting this piece.
+- Positional-run detection: track a sliding window of the last several
+  league-wide picks (not just yours) and flag when one position is
+  clearly over-represented ("4 of the last 6 picks were RBs").
+- Auto-refreshing UI (streamlit-autorefresh or an st.rerun() loop on a
+  timer) instead of a manual refresh button. This is the riskiest of
+  the additions, since a refresh loop can behave differently once it's
+  actually open for hours during a real draft versus a quick local
+  test, so it needs real time in Phase 7, not just a glance.
 
-If time runs short close to Aug 21, cut stretch items and UI polish
-before cutting anything in "core." A plain-text list with the right
-recommendation logic beats a pretty dashboard that's just sorting by
-raw points.
+If any of this runs long, the one thing that cannot get compressed to
+make room is Phase 7. A tool that's missing a feature is fine on draft
+day; a tool you've never actually run against a live draft is not.
 
 - **Checkpoint:** what's your plan if Sleeper's API is briefly
   unreachable mid-draft? Does the tool crash or degrade gracefully?
 
-## Phase 7: Dry run and draft day (Day 10-11)
+## Phase 7: Dry run and draft day (Day 11-12)
+
+This does not move, regardless of how Phase 6 goes.
 
 - Start a free Sleeper mock draft, run the tool against it end to end
   on whatever device you'll actually use on Aug 21.
