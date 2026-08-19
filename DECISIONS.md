@@ -252,3 +252,74 @@ project later: not just what the code does, but why I chose it.
   `current_player_pool`'s offense-position filter excludes even though
   he has real offensive stats too. A different issue than team
   normalization, noted for later, not chased down now.
+
+## 2026-08-19: Phase 4, backtest/run_backtest.py
+
+- Walk-forward backtest, Ridge vs. naive, across every season we can
+  honestly test: test_season in [2021, 2022, 2023, 2024, 2025], training
+  on everything strictly before it each time. 2021 is the earliest valid
+  test season, 2020 has no earlier target_season to train on at all
+  (2019 is the earliest feature season in our data).
+- Scoped to Ridge vs. naive only, not the three-way (Ridge, ECR, blend)
+  comparison PROJECT_PLAN.md originally asks for. Checked directly:
+  FantasyPros' historical rankings aren't available for free, historical/
+  bulk access is a paid Commercial-tier API feature. There's no honest
+  way to know what FantasyPros actually said in August of 2021-2024
+  without that access, and any proxy built from data we already have
+  would just be re-derived from box scores, defeating the reason ECR is
+  useful in the first place (it carries information box scores can't
+  see). The ECR/blend three-way comparison stays un-validated against
+  history. Real limitation, not a shortcut.
+- Verified the loop itself before trusting its output: train_n grows
+  monotonically within every position across folds (QB: 71/153/234/317/
+  398, RB: 146/303/468/626/774, WR: 230/463/719/958/1182, TE: 125/255/
+  386/514/637), confirming forward-chaining, not leakage. The 2025 fold
+  reproduces model.py's single-fold numbers exactly (QB 61.68/60.83, RB
+  40.76/39.48, WR 33.24/37.23, TE 25.03/27.53), confirming the walk-
+  forward loop is built correctly rather than silently diverging from
+  the earlier check.
+- Full results, no softening. Ridge only clearly beats naive on MAE at
+  WR:
+
+  | Position | Ridge wins | Mean Ridge MAE | Mean Naive MAE | Mean Ridge Spearman | Mean Naive Spearman | Winner (MAE) |
+  |---|---|---|---|---|---|---|
+  | QB | 1/5 (20%) | 63.24 | 61.65 | 0.692 | 0.682 | Naive |
+  | RB | 2/5 (40%) | 43.27 | 43.16 | 0.699 | 0.705 | Naive |
+  | TE | 3/5 (60%) | 28.00 | 27.42 | 0.708 | 0.724 | Naive |
+  | WR | 4/5 (80%) | 36.75 | 38.52 | 0.735 | 0.742 | Ridge |
+
+  The single Phase 3 fold (2025 only) undersold how bad QB and RB are on
+  MAE: that fold showed both losing narrowly, the full walk-forward shows
+  QB losing badly (1/5 folds) and RB losing more often than not (2/5).
+- TE is the concrete answer to the checkpoint question ("what does
+  'beating the baseline X% of the time' actually mean, and what would
+  make you not trust that number"): Ridge wins the *majority* of TE
+  folds by count (3/5), but still loses on mean MAE, because its two
+  losing folds (2021: 34.70 vs. 29.35, 2022: 28.08 vs. 26.22) are bigger
+  misses than its three winning folds are wins (0.17, 1.67, 2.50 point
+  margins). Win rate and win magnitude point in different directions
+  here. A headline of "Ridge wins 3 out of 5 folds at TE" would have
+  been true and also would have been the wrong takeaway. With only 5
+  folds total at any position, a single flipped fold swings the rate by
+  20 points either way, that fragility is real, not a caveat to gloss
+  past.
+- QB shows the mirror-image pattern, worth stating plainly since it's a
+  genuinely different conclusion than "Ridge loses at QB": Ridge loses
+  on MAE (63.24 vs. 61.65) and loses on fold count (1/5), but its mean
+  Spearman rank correlation actually favors Ridge over naive (0.692 vs.
+  0.682). That means Ridge may be getting QB's relative ordering more
+  right than naive, more correctly separating who's better than whom,
+  even while missing on absolute point totals more often. Whether that
+  matters depends entirely on what Phase 5's VBD math ends up caring
+  about most: if VBD is more sensitive to getting the rank order right
+  than to hitting an exact point total, QB's story isn't as simply
+  "Ridge loses" as the MAE table alone suggests.
+- Open question flagged for Phase 5, not decided today: the ECR blend
+  weight (`ecr_blend.py`'s `BLEND_WEIGHT = 0.5`) was picked before this
+  backtest existed, uniform across all four positions. Now that QB and
+  RB have real evidence Ridge underperforms naive on MAE while WR
+  clearly beats it (and QB's Spearman result complicates even that),
+  that uniform 0.5 is carrying forward an assumption this backtest
+  didn't have when it was made. Worth deciding in Phase 5 whether the
+  blend weight should vary by position instead of staying flat, rather
+  than carrying the old assumption forward silently.
