@@ -22,6 +22,8 @@ from src.data_pipeline import load_config
 
 SLEEPER_LEAGUE_URL = "https://api.sleeper.app/v1/league/{league_id}"
 DRAFT_PICKS_URL = "https://api.sleeper.app/v1/draft/{draft_id}/picks"
+DRAFT_URL = "https://api.sleeper.app/v1/draft/{draft_id}"
+USER_URL = "https://api.sleeper.app/v1/user/{username}"
 
 PICK_COLUMNS = [
     "pick_no", "round", "draft_slot", "roster_id",
@@ -101,6 +103,27 @@ def pull_draft_picks(draft_id):
     return _picks_to_dataframe(response.json())
 
 
+def pull_user_id(username):
+    """Resolve a Sleeper username to its user_id. Thin primitive, no
+    caching: a single cheap call at tracker startup, no reason to add
+    caching complexity for it."""
+    url = USER_URL.format(username=username)
+    response = requests.get(url)
+    response.raise_for_status()
+    return response.json()["user_id"]
+
+
+def pull_draft_metadata(draft_id):
+    """Fetch the full draft object (draft_order, slot_to_roster_id,
+    status, settings, ...). A raw primitive, not scoped narrowly to just
+    roster-id resolution: draft status in particular is generically
+    useful on its own later."""
+    url = DRAFT_URL.format(draft_id=draft_id)
+    response = requests.get(url)
+    response.raise_for_status()
+    return response.json()
+
+
 if __name__ == "__main__":
     config = load_config()
     league_id = config["league"]["league_id"]
@@ -159,3 +182,13 @@ if __name__ == "__main__":
         f"position={row['position']!r}, team={row['team']!r} "
         f"(expected: David / Johnson / RB / ARI)"
     )
+
+    print()
+    print("=== User/roster resolution (Phase 6, chunk 3) ===")
+    username = config["league"]["sleeper_username"]
+    user_id = pull_user_id(username)
+    print(f"{username} -> user_id {user_id}")
+    draft_meta = pull_draft_metadata(draft_id)
+    my_slot = draft_meta["draft_order"].get(user_id)
+    my_roster_id = draft_meta["slot_to_roster_id"].get(str(my_slot)) if my_slot else None
+    print(f"draft slot {my_slot} -> roster_id {my_roster_id} (expected: 9 -> 8)")

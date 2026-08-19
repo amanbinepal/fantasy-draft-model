@@ -35,7 +35,8 @@ import pandas as pd
 
 from src.data_pipeline import pull_weekly_stats
 from src.ecr_blend import current_player_pool, normalize_name, normalize_team
-from src.sleeper_api import pull_draft_picks
+from src.recommend import recommend_next_pick
+from src.sleeper_api import pull_draft_metadata, pull_draft_picks, pull_user_id
 from src.vbd import _build_blended_table, assign_tiers, compute_vbd
 
 POLL_INTERVAL_SECONDS = 5
@@ -96,6 +97,19 @@ def match_pick(pick, available_board):
     return None, "unmatched"
 
 
+def resolve_my_roster_id(username, draft_id):
+    """Resolve a Sleeper username to the roster_id it owns in a specific
+    draft, via user_id -> draft_order -> slot_to_roster_id. Resolved
+    fresh each run rather than hardcoded in config.yaml, so it can't go
+    stale if draft order were ever reset before the draft locks in."""
+    user_id = pull_user_id(username)
+    draft_meta = pull_draft_metadata(draft_id)
+    my_slot = draft_meta["draft_order"].get(user_id)
+    if my_slot is None:
+        raise ValueError(f"{username} (user_id {user_id}) not found in this draft's draft_order")
+    return draft_meta["slot_to_roster_id"][str(my_slot)]
+
+
 def _print_unresolved(unresolved_picks):
     """Reprints every cycle, not just once when a pick first fails to
     match, so it can't scroll off screen and get forgotten mid-draft."""
@@ -105,12 +119,29 @@ def _print_unresolved(unresolved_picks):
             print(f"    Pick {p['pick_no']}: {p['name']} ({p['position']}, {p['team']})")
 
 
-def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterations=None):
-    """Poll, diff against last-seen picks, match, shrink the pool.
+def _print_recommendation(available, my_positions, config):
+    """The one highlighted answer at the top of every cycle, not a list
+    to interpret. Printed every cycle, not just when a new pick lands:
+    it should be answerable at a glance at any moment mid-draft."""
+    top, needs, reason = recommend_next_pick(available, my_positions, config)
+    print("*** RECOMMENDED NEXT PICK ***")
+    if top is not None:
+        print(
+            f"    {top['player_display_name']} ({top['position']}), "
+            f"vbd_value={top['vbd_value']:.1f}, tier {top['tier']}"
+        )
+    print(f"    Reason: {reason}")
+
+
+def run_tracker(draft_id, board, config, my_roster_id,
+                 poll_interval=POLL_INTERVAL_SECONDS, max_iterations=None):
+    """Poll, diff against last-seen picks, match, shrink the pool, and
+    print the roster-need-aware recommendation every cycle.
     max_iterations is for testing only, a real draft-day run leaves it
-    None and relies on Ctrl+C. Returns (drafted_indices, unresolved_picks)
-    so tests can inspect the final state."""
+    None and relies on Ctrl+C. Returns (drafted_indices, my_drafted_indices,
+    unresolved_picks) so tests can inspect the final state."""
     drafted_indices = set()
+    my_drafted_indices = set()
     last_seen_pick_no = 0
     unresolved_picks = []
     consecutive_failures = 0
@@ -131,6 +162,9 @@ def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterat
                     f"{exc}. Retrying in {poll_interval}s."
                 )
                 _print_unresolved(unresolved_picks)
+                available = board[~board.index.isin(drafted_indices)]
+                my_positions = board.loc[list(my_drafted_indices), "position"]
+                _print_recommendation(available, my_positions, config)
                 if max_iterations is None or iterations < max_iterations:
                     time.sleep(poll_interval)
                 continue
@@ -139,18 +173,25 @@ def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterat
 
             if len(new_picks):
                 available = board[~board.index.isin(drafted_indices)]
+                pick_lines = []  # buffered, not printed yet: the recommendation
+                # must print before these per-pick details, per PROJECT_PLAN.md's
+                # "one highlighted answer at the top," but still needs to be
+                # computed *after* this cycle's picks are processed, using the
+                # up-to-date pool/roster, not a stale pre-cycle state.
                 for _, pick in new_picks.iterrows():
                     idx, match_type = match_pick(pick, available)
                     name = f"{pick['first_name']} {pick['last_name']}"
                     if idx is not None:
                         drafted_indices.add(idx)
+                        if str(pick["roster_id"]) == str(my_roster_id):
+                            my_drafted_indices.add(idx)
                         available = available.drop(index=idx)
-                        print(
+                        pick_lines.append(
                             f"Pick {pick['pick_no']}: {name} ({pick['position']}, "
                             f"{pick['team']}) -> matched [{match_type}], removed from pool"
                         )
                     else:
-                        print(
+                        pick_lines.append(
                             f"Pick {pick['pick_no']}: {name} ({pick['position']}, "
                             f"{pick['team']}) -> {match_type.upper()}, NOT removed from pool"
                         )
@@ -162,6 +203,11 @@ def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterat
                 last_seen_pick_no = picks["pick_no"].max()
 
                 _print_unresolved(unresolved_picks)
+                my_positions = board.loc[list(my_drafted_indices), "position"]
+                _print_recommendation(available, my_positions, config)
+                print()
+                for line in pick_lines:
+                    print(line)
                 print()
                 print("=== Top 10 available by VBD ===")
                 top10 = available.sort_values("vbd_value", ascending=False).head(10)
@@ -169,6 +215,9 @@ def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterat
                 print()
             else:
                 _print_unresolved(unresolved_picks)
+                available = board[~board.index.isin(drafted_indices)]
+                my_positions = board.loc[list(my_drafted_indices), "position"]
+                _print_recommendation(available, my_positions, config)
                 print(f"[poll] no new picks ({len(picks)} total so far)")
 
             if max_iterations is None or iterations < max_iterations:
@@ -176,10 +225,27 @@ def run_tracker(draft_id, board, poll_interval=POLL_INTERVAL_SECONDS, max_iterat
     except KeyboardInterrupt:
         print("\nStopped by user.")
 
-    return drafted_indices, unresolved_picks
+    return drafted_indices, my_drafted_indices, unresolved_picks
 
 
 if __name__ == "__main__":
     board, config = build_tracker_board()
     print(f"Board built: {len(board)} players tracked.")
-    run_tracker(config["league"]["draft_id"], board)
+
+    draft_id = config["league"]["draft_id"]
+    my_roster_id = resolve_my_roster_id(config["league"]["sleeper_username"], draft_id)
+    print(f"Resolved my roster_id: {my_roster_id}")
+
+    drafted_indices, my_drafted_indices, unresolved_picks = run_tracker(
+        draft_id, board, config, my_roster_id
+    )
+
+    print()
+    print("=== Session summary ===")
+    print(f"{len(drafted_indices)} total picks tracked, {len(my_drafted_indices)} of them mine")
+    if unresolved_picks:
+        print(f"*** {len(unresolved_picks)} unresolved pick(s) still need manual review: ***")
+        for p in unresolved_picks:
+            print(f"    Pick {p['pick_no']}: {p['name']} ({p['position']}, {p['team']})")
+    else:
+        print("No unresolved picks.")

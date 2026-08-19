@@ -2,6 +2,7 @@ league:
   platform: sleeper
   league_id: 1312630302115377152
   draft_id: 1312630302123790336
+  sleeper_username: amanbinepal
   teams: 10
   scoring: full_ppr
   td_bonus_40plus: true

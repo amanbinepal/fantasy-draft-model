@@ -534,3 +534,70 @@ project later: not just what the code does, but why I chose it.
     crashing.
   - Full real-data verification (actual live pick timing and shapes over
     hours) is still Phase 7's mock draft.
+
+## 2026-08-19: Phase 6, chunk 3, recommend.py
+
+- Resolved "which roster is mine" directly against the live API rather
+  than guessing at the mechanism: Sleeper username `amanbinepal` ->
+  `user_id 723717928045867008` -> draft slot 9 -> `roster_id 8`, via
+  `draft_order` and `slot_to_roster_id`, both already present in the
+  draft metadata. `roster_id` isn't hardcoded into config.yaml, it's
+  resolved fresh each run (`sleeper_username` is the only new config
+  field), so it can't go stale if draft order were ever reset before
+  the draft locks in. Confirmed `8` twice against the real API: once
+  standalone, once again inside `live_tracker.py`'s own startup.
+- Roster-need computation is mechanically derived from the roster shape
+  in config.yaml, not a judgment call the way the ECR blend weight or
+  the tier threshold were: QB is needed iff `qb_drafted < 1` (no flex
+  eligibility for QB in this league). RB/WR/TE share one condition,
+  `(RB + WR + TE drafted) < 7` (2 + 2 + 1 fixed, + 2 flex), since any of
+  the three can still fill an open flex slot regardless of which
+  specific position it "belongs" to. Not an approximation, it falls
+  directly out of the real roster math.
+- Recommendation: filter the available board to still-needed positions,
+  take the highest VBD value among them; if no starting need remains,
+  fall back to best-available on the whole board rather than going
+  silent, this league's 6 BN + 2 IR slots mean bench value is real.
+- Hit and fixed a circular import while wiring this in: `recommend.py`'s
+  own standalone test wanted `build_tracker_board` from
+  `live_tracker.py`, but `live_tracker.py` needs `recommend_next_pick`
+  from `recommend.py` at module level to print the recommendation inside
+  the polling loop. Fixed by moving `recommend.py`'s import of
+  `build_tracker_board` inside its own `__main__` guard, it's only ever
+  needed there.
+- Caught a real print-order bug on review, not by first-pass testing:
+  the recommendation is supposed to be "one highlighted answer at the
+  top" per PROJECT_PLAN.md, but the first implementation printed each
+  pick's match/removal line *inside* the processing loop, before the
+  recommendation was computed and printed, so a user would see pick-by-
+  pick chatter first and the actual answer buried after it. Fixed by
+  buffering the per-pick lines during the loop and printing the
+  recommendation before them, confirmed with real output afterward
+  (`RECOMMENDED NEXT PICK` now prints immediately, before any pick
+  detail).
+- Also caught on review: `live_tracker.py`'s own `__main__` called
+  `run_tracker` without capturing its three-value return at all, so
+  Ctrl+C would end a session with no summary of what happened, notably
+  no final reminder of any unresolved picks still needing manual review,
+  exactly the thing worth seeing one more time on the way out. Fixed:
+  `__main__` now unpacks the return and prints a session summary (total
+  picks tracked, how many were mine, and an explicit list of any
+  unresolved picks still outstanding). Verified with real, pasted output
+  from a 2-pick synthetic run (1 mine and matched, 1 someone else's and
+  unmatched):
+  ```
+  === Session summary ===
+  1 total picks tracked, 1 of them mine
+  *** 1 unresolved pick(s) still need manual review: ***
+      Pick 2: Xyzabc Notrealplayer (WR, ZZZ)
+  ```
+- Verified end to end with a synthetic two-roster smoke test (own
+  roster_id 8 vs. a fake other roster_id 3): my QB pick immediately
+  dropped QB from the recommendation's needed-position list; another
+  team's pick (Puka Nacua) shrank the shared available pool, visibly
+  absent from the next printed top-10, but didn't touch my roster
+  tracking or needs at all; two RBs landing in the same batch both
+  correctly attributed to me (final state: 4 total picks removed across
+  both rosters, exactly 3 counted as mine: QB, RB, RB). This completes
+  the console-first MVP; next is Phase 7's real mock-draft dry run, not
+  more features.
