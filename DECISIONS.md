@@ -102,3 +102,49 @@ project later: not just what the code does, but why I chose it.
   computes as `min(1, 1) = 1` and gets a bonus it shouldn't, because the
   count-only `passing_40`/`rushing_40`/`receiving_40` columns can't tell
   us the 40+ play and the scoring play were different plays.
+
+## 2026-08-19: Phase 2, features.py
+
+- Target variable: a player's total fantasy_points in the season right
+  after their feature season (target_season = feature_season + 1), one
+  row per (player, target_season) pair. What would leak into it if built
+  carelessly: computing a season's aggregates from a dataframe that
+  still contains other seasons' rows (features and target need to come
+  from two genuinely separate slices before any joining happens), or
+  matching a player's feature season to their target season by name
+  instead of player_id, since a name-string quirk or a mid-career
+  position reclassification could silently break the pairing and get
+  misread as the player having dropped off entirely.
+- Dropout handling: left join, defaulting target_fantasy_points to 0 for
+  a player who has a feature-season row but no rows at all next season.
+  Chose this over an inner join (which would silently drop those
+  players) because bust/injury/retirement is a real outcome a draft pick
+  can face, and only ever training on players who stuck around would be
+  survivorship bias, the model should see the zero, not just the players
+  who kept producing.
+- Found this while implementing, not something the original plan called
+  out: that dropout rule only means what it's supposed to mean if the
+  target season actually exists in our pulled data. The most recent
+  feature season (2025) has no 2026 data to pair against, because the
+  2026 season hasn't been played yet, that's the season this whole
+  project is drafting for. Without checking for that, every single 2025
+  player would've gotten target_fantasy_points = 0, indistinguishable
+  from a real dropout, when the real reason is "that season doesn't
+  exist yet," not "this player produced nothing." Fixed by requiring the
+  target season to be a season we actually have data for before pairing
+  it, so 2019-2020 through 2024-2025 are real training pairs, and the
+  2025 season's rows fall out of the training table entirely. Those 2025
+  rows aren't wasted, they become the actual input Phase 3 uses to
+  generate live 2026 projections, just not a labeled training row, since
+  we don't have a real answer to check them against.
+- Feature breadth: lean for this first pass. Season totals and per-game
+  rates for the core counting stats, games played, and prior-season
+  fantasy_points, no advanced route/target-share metrics (target_share,
+  air_yards_share, wopr, racr, pacr) yet. Those are pass-catcher-only and
+  add explaining surface without being needed to get a first working
+  model going; easy to add later once backtest results show where the
+  lean version falls short.
+- Known simplification, not fixed today: position is taken from the
+  feature season only and never re-checked against the target season, so
+  a mid-career position change (rare, but real) would carry a stale
+  position label forward into that training row.
