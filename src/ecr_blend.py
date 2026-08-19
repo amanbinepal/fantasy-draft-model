@@ -36,9 +36,17 @@ from src.features import build_season_table, build_training_table
 from src.model import POSITION_FEATURES, train_final_models
 from src.scoring import load_scoring_settings
 
-BLEND_WEIGHT = 0.5  # ridge weight; ecr gets (1 - BLEND_WEIGHT). Starting
-# point per PROJECT_PLAN.md ("a simple weighted average is a fine
-# starting point"), worth tuning once Phase 4's backtest exists.
+# Ridge weight per position; ecr gets (1 - weight). Started as a flat 0.5
+# everywhere (Phase 3, before any backtest existed). Phase 4's walk-forward
+# backtest (Ridge vs. naive) gave real per-position evidence, so these are
+# now tiered by how consistently Ridge beat naive there: QB lost clearly
+# (1/5 folds, worse MAE, tempered by a Spearman win) so leans more on ECR;
+# WR won clearly (4/5 folds, better MAE) so leans more on Ridge; RB and TE
+# had contradictory or near-tied evidence, not enough signal in 5 noisy
+# folds to move off neutral. See DECISIONS.md: this is a directionally
+# justified adjustment from Ridge-vs-naive evidence, not a calibrated
+# Ridge-vs-ECR optimum, ECR itself has no historical data to backtest.
+POSITION_BLEND_WEIGHTS = {"QB": 0.40, "RB": 0.50, "WR": 0.60, "TE": 0.50}
 
 OFFENSE_POSITIONS = ["QB", "RB", "WR", "TE"]
 
@@ -205,12 +213,14 @@ def implied_points_by_rank(ecr_df, ridge_projections):
     return result
 
 
-def blend_projections(ridge_projections, ecr_matched, weight=BLEND_WEIGHT):
+def blend_projections(ridge_projections, ecr_matched, weights=POSITION_BLEND_WEIGHTS):
     """Outer-join Ridge's projections with matched ECR-implied points on
-    player_id. Weighted average where both exist, whichever single
-    source exists otherwise. Unmatched ECR rows (rookies, or genuine
-    misses) have no player_id to join on, they're appended separately
-    with ecr_implied_points as their entire projection."""
+    player_id. Weighted average where both exist, using that row's own
+    position's weight (not one constant for every position), whichever
+    single source exists otherwise. Unmatched ECR rows (rookies, or
+    genuine misses) have no player_id to join on, they're appended
+    separately with ecr_implied_points as their entire projection,
+    weight is irrelevant there either way."""
     matched = ecr_matched[ecr_matched["player_id"].notna()]
     unmatched = ecr_matched[ecr_matched["player_id"].isna()]
 
@@ -218,9 +228,10 @@ def blend_projections(ridge_projections, ecr_matched, weight=BLEND_WEIGHT):
         matched[["player_id", "ecr_implied_points", "match_type", "position_changed"]],
         on="player_id", how="outer",
     )
+    row_weight = merged["position"].map(weights)
     merged["blended_points"] = np.where(
         merged["ecr_implied_points"].notna(),
-        weight * merged["predicted_points"] + (1 - weight) * merged["ecr_implied_points"],
+        row_weight * merged["predicted_points"] + (1 - row_weight) * merged["ecr_implied_points"],
         merged["predicted_points"],
     )
 
@@ -263,6 +274,9 @@ if __name__ == "__main__":
     scoring_settings = load_scoring_settings()
     season_df = build_season_table(df, scoring_settings)
     table = build_training_table(season_df)
+
+    print(f"Blend weights (Ridge weight per position, ecr gets the rest): "
+          f"{POSITION_BLEND_WEIGHTS}")
 
     models = train_final_models(table)
     ridge_projections = _predict_current_season(season_df, models, current_season)
@@ -311,6 +325,24 @@ if __name__ == "__main__":
         f"ecr_implied={veteran['ecr_implied_points']:.1f}, "
         f"blended={veteran['blended_points']:.1f}"
     )
+
+    print()
+    print("=== QB weight-change example (Aaron Rodgers, flat 0.5 gave 160.5 in Phase 3) ===")
+    qb_candidates = blended[
+        (blended["player_display_name"] == "Aaron Rodgers")
+        & blended["ecr_implied_points"].notna()
+    ]
+    if len(qb_candidates):
+        rodgers = qb_candidates.iloc[0]
+        print(
+            f"{rodgers['player_display_name']} (QB, weight={POSITION_BLEND_WEIGHTS['QB']}): "
+            f"ridge={rodgers['predicted_points']:.1f}, "
+            f"ecr_implied={rodgers['ecr_implied_points']:.1f}, "
+            f"blended={rodgers['blended_points']:.1f} (should sit closer to "
+            f"ecr_implied than the old flat-0.5 blend of 160.5 did)"
+        )
+    else:
+        print("Aaron Rodgers not found with both signals this run, skipping")
 
     print()
     print("=== Worked rookie/unmatched example ===")

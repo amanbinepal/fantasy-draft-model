@@ -323,3 +323,46 @@ project later: not just what the code does, but why I chose it.
   didn't have when it was made. Worth deciding in Phase 5 whether the
   blend weight should vary by position instead of staying flat, rather
   than carrying the old assumption forward silently.
+
+## 2026-08-19: Revisit ecr_blend.py's blend weight before Phase 5
+
+- Closed the open question from the Phase 4 entry: replaced the flat
+  `BLEND_WEIGHT = 0.5` with `POSITION_BLEND_WEIGHTS = {"QB": 0.40, "RB":
+  0.50, "WR": 0.60, "TE": 0.50}` (Ridge's own weight; ECR gets the
+  rest), using the walk-forward backtest's actual per-position evidence.
+  Tiered by hand rather than a continuous formula off the MAE gap: a
+  formula would hide an arbitrary sensitivity constant inside it, no
+  more principled than picking tiers directly, and there's no more
+  evidence to tune that constant against than there is to pick tiers by
+  hand.
+  - QB down to 0.40: backtest's worst fold-count result (1/5) and a
+    clear MAE loss (63.24 vs. 61.65), but moved moderately, not to the
+    floor, since QB's mean Spearman actually favors Ridge (0.692 vs.
+    0.682), the evidence isn't unanimous against it.
+  - WR up to 0.60: the strongest, most consistent evidence of any
+    position (wins MAE clearly, 4/5 folds). Worth naming the one wrinkle:
+    WR's Spearman actually slightly favors naive too (0.735 vs. 0.742),
+    so Ridge's real edge here is specifically in point accuracy, not
+    rank ordering. Weighted by MAE anyway, since blended_points is a
+    points-space number feeding Phase 5's VBD math, where point accuracy
+    is the more directly relevant metric.
+  - RB and TE left at 0.50: RB's MAE gap (43.27 vs. 43.16) is
+    essentially a tie, and TE's evidence actively contradicts itself
+    (wins fold-count 3/5, loses on mean MAE, already logged in the
+    Phase 4 entry as the win-rate-vs-magnitude example). Not enough
+    signal in 5 noisy folds to justify moving either off neutral.
+- Real scope limit, stated plainly: this is a directionally justified
+  adjustment, not a calibrated Ridge-vs-ECR optimum. The backtest only
+  ever measured Ridge against naive, never against ECR, since ECR has no
+  free historical data to backtest against at all (same gap logged in
+  the Phase 4 entry). The reasoning is "Ridge has been shown weaker here
+  than a trivial baseline, so lean more on a source that carries
+  information box scores structurally can't," a real, defensible
+  direction, just not a precisely tuned number.
+- Verified the change actually took effect rather than being a no-op:
+  Aaron Rodgers' QB blend moved from 160.5 (the old flat 0.5) to 153.8
+  under the new 0.40 weight, matching the hand calculation
+  (0.4*194.1 + 0.6*126.9 = 153.78) exactly. Rookie/unmatched rows are
+  unaffected either way, confirmed `blended_points == ecr_implied_points`
+  still holds exactly for them (Jeremiyah Love: 175.0 == 175.0), the
+  per-position weight lookup doesn't touch that path.
