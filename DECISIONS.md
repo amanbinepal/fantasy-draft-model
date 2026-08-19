@@ -480,3 +480,57 @@ project later: not just what the code does, but why I chose it.
   Sleeper's own documented example shape, not a real in-progress draft.
   Full end-to-end verification against real, non-empty picks is Phase
   7's mock draft, not fabricated here.
+
+## 2026-08-19: Phase 6, chunk 2, live_tracker.py
+
+- Board builds once at tracker startup (reusing vbd.py's chain), not
+  recomputed per poll: Ridge/ECR/VBD don't change during a draft, only
+  which players are still available does, so recomputing the whole
+  projection pipeline every 5 seconds would be pure waste.
+- Matching a live pick to the board reuses `ecr_blend.normalize_name` /
+  `normalize_team` directly, the same approach already proven on this
+  exact kind of problem in Phase 3, scoped down to one incremental pick
+  per call rather than `match_ecr_to_players`'s batch shape. Confirms
+  the earlier chunk's finding was right to act on: Sleeper's gsis_id
+  crosswalk (19% coverage) genuinely isn't usable as the primary
+  mechanism, name-based matching is doing the real work here.
+- Unmatched picks are never force-matched: decided a wrong guess could
+  silently remove the *wrong* player from the pool, which is worse than
+  leaving an actually-drafted player visible, since a human can catch a
+  visible warning but can't catch a silent wrong removal. Tracked in a
+  running list that reprints at the top of every status update, not
+  logged once and left to scroll off screen during a multi-hour draft.
+  Same treatment for "ambiguous" (name matched multiple board
+  candidates, team tiebreak didn't resolve it).
+- Graceful degradation, answering PROJECT_PLAN.md's Phase 6 checkpoint
+  directly in the code, not just in prose: a poll failure is caught,
+  prints a warning with a running consecutive-failure count, and retries
+  next cycle, the loop itself never gives up. Works cleanly with the
+  pick_no-based diffing specifically: a transient outage just means the
+  next successful poll picks up everything that accumulated since the
+  last one, nothing needs special recovery handling.
+- Verified with a synthetic smoke test (the real draft is still
+  pre-draft, no live picks exist to test against yet), and specifically
+  checked two things with real printed output rather than asserting
+  them in prose, since a first pass at this test hadn't actually
+  exercised either:
+  - "ambiguous" vs. "unmatched" print as visibly different strings
+    (`AMBIGUOUS` vs. `UNMATCHED`), checked by calling `match_pick`
+    directly against a hand-built two-candidate board (same normalized
+    name, a pick team matching neither), since no real name collision
+    exists anywhere in the actual board to exercise that branch
+    naturally.
+  - Two new picks arriving in the same poll batch (not spread across
+    separate cycles) both get matched and removed correctly, checked by
+    feeding a single cycle two real, previously-unseen players (Puka
+    Nacua, Bijan Robinson) at once and confirming the very next printed
+    top-10 excludes both, direct evidence the pool shrinks correctly
+    *within* a batch, not just across polls.
+  - Also confirmed (same run): a real matchable pick (Ja'Marr Chase)
+    gets removed and disappears from the printed board; a deliberately
+    unmatchable garbled name stays in the pool and reappears in the
+    persistent unresolved list across multiple cycles; a simulated API
+    failure prints a warning and the loop keeps running instead of
+    crashing.
+  - Full real-data verification (actual live pick timing and shapes over
+    hours) is still Phase 7's mock draft.
