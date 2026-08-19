@@ -435,3 +435,48 @@ project later: not just what the code does, but why I chose it.
   to their player counts (roughly 5 players per tier on average across
   all four positions), no sign of the collapse-to-1-2-tiers failure mode
   mean+std would have risked.
+
+## 2026-08-19: Phase 6, chunk 1, sleeper_api.py draft-pick polling
+
+- Real timeline check before starting Phase 6: PROJECT_PLAN.md scoped
+  this phase for 3 days (Day 9-11), we have about 1.5 days left before
+  real Phase 7 dry-run time is needed. Scoped Phase 6 to a console-first
+  MVP (draft-pick polling, poll-diff-remove loop, roster-need-aware
+  recommendation) with a real mock-draft dry run before any of the
+  stretch pieces (tier alerts, positional-run detection, the Streamlit
+  auto-refresh UI PROJECT_PLAN.md itself calls "the riskiest of the
+  additions"), so Phase 7 doesn't get crowded out the way PROJECT_PLAN.md
+  explicitly warns against.
+- Checked whether Sleeper's own player IDs cross-reference cleanly to
+  our nflverse-based player_id before assuming either way. nflverse's
+  player_id format (00-00XXXXX) is literally a GSIS ID, and Sleeper's
+  player reference does carry a gsis_id field, confirmed a real match
+  on Josh Allen (00-0034857 in both systems). But coverage is bad where
+  it matters: only 19.2% of our own 608 relevant 2025 players have a
+  populated gsis_id in Sleeper's reference, and Puka Nacua, our own
+  WR1, is one of the misses (gsis_id: None despite being an obviously
+  well-tracked active player). A real, known gap in Sleeper's data,
+  confirmed by direct query against both APIs, not assumed either way.
+  So the ID crosswalk can't be the primary matching mechanism.
+- Checked the real pick object shape via Sleeper's own API docs instead
+  of guessing: each pick's metadata field already carries first_name,
+  last_name, position, team inline. That means matching a pick to our
+  board can reuse `ecr_blend.normalize_name` / `normalize_team` directly,
+  already built and proven on this exact kind of name-matching problem
+  in Phase 3, rather than building a second, less reliable ID-based
+  system on top of the sparse gsis_id data. Kept the matching logic
+  itself out of sleeper_api.py: it belongs in live_tracker.py, the next
+  chunk, since "remove drafted players from the pool" is what actually
+  needs it, sleeper_api.py stays a thin, generic API wrapper.
+- `pull_draft_picks` has no caching, a deliberate contrast with
+  `pull_scoring_settings`'s cache-with-no-refresh: picks change
+  throughout the draft, so every poll needs a genuinely fresh pull. A
+  stale cache here would be actively dangerous (recommending an
+  already-drafted player), not just imprecise the way a stale cache
+  would be for something like season-fixed scoring settings.
+- Real limitation, stated plainly: the actual configured draft is still
+  pre-draft (verified live, 0 picks, status `pre_draft`), so the parsing
+  logic could only be verified against a synthetic pick built from
+  Sleeper's own documented example shape, not a real in-progress draft.
+  Full end-to-end verification against real, non-empty picks is Phase
+  7's mock draft, not fabricated here.
