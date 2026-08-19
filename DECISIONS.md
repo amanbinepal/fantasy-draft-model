@@ -366,3 +366,72 @@ project later: not just what the code does, but why I chose it.
   unaffected either way, confirmed `blended_points == ecr_implied_points`
   still holds exactly for them (Jeremiyah Love: 175.0 == 175.0), the
   per-position weight lookup doesn't touch that path.
+
+## 2026-08-19: Phase 5, vbd.py
+
+- Replacement level = worst starter (Value Over Last Starter), not worst
+  rostered player: bench (6) and IR (2) aren't counted, there's no clean
+  way to derive bench-stash depth per position from the roster shape the
+  way starter counts and flex slots can be derived. QB has no flex
+  eligibility (this league has no superflex), so its replacement level
+  is just its 10th-best player by blended_points. RB/WR/TE share the 20
+  flex slots.
+- Found and fixed a real bug in the first implementation, not just a
+  theoretical concern: the first version pooled all RB/WR/TE together
+  unconstrained and took the top 70 by value. That let deep positions
+  crowd out a shallow position's *guaranteed* floor, every team fields
+  exactly 1 TE starter regardless of whether that TE would "deserve" a
+  value-based spot against a deep WR class that season. Caught it
+  because the flex-allocation printout showed TE claiming only 8 of the
+  70 combined slots despite needing 10 fixed starters, a number that's
+  supposed to be a floor, not a soft target. Fixed by guaranteeing each
+  position's fixed starter count first (RB 20, WR 20, TE 10), then
+  letting only the *remaining* players compete openly for the 20 flex
+  slots. After the fix: TE claims exactly its floor of 10, RB claims 26
+  (6 above its floor), WR claims 34 (14 above its floor), summing
+  exactly to the 20 flex slots. TE's replacement level dropped from
+  131.4 (buggy) to 124.2 (correct), now legitimately the lowest of any
+  position, matching TE's real-world reputation as fantasy's shallowest
+  position, a sign the fix produced a *more* sensible result, not just a
+  different one.
+- Actual replacement levels found: QB 228.9, RB 137.4, WR 132.4, TE
+  124.2. QB's replacement level sitting far above the other three is
+  itself informative: even a bottom-of-the-barrel starting QB scores a
+  lot under this league's scoring, which is exactly why raw points
+  overrates QB early in a draft, addressed directly below.
+- The checkpoint, made concrete rather than just asserted: raw
+  blended_points top 15 is stacked with QBs (Josh Allen, Drake Maye,
+  Jalen Hurts, Caleb Williams, Trevor Lawrence, Lamar Jackson, Justin
+  Herbert, 7 of 15), because QB's point *totals* are naturally higher
+  under this scoring, not because QBs are actually scarcer or more
+  valuable at the margin. VBD's top 15 has only 1 QB (Josh Allen, at
+  #9), because QB's replacement level is so much higher too, so the gap
+  above replacement, the part that actually matters for who's worth
+  drafting first, is much smaller than raw points suggests. Trey McBride
+  (TE) enters the VBD top 15 at #14, invisible in the raw-points list
+  entirely, direct evidence of the bug fix mattering: his real
+  positional scarcity was hidden under the inflated, buggy TE
+  replacement level. Malik Willis (a backup QB) is the biggest mover in
+  the other direction: raw rank 87 (his point total looks decent in
+  isolation) but VBD rank 289 (down 202 spots), because his 141.2
+  blended_points sits 87.7 points *below* QB's 228.9 replacement level,
+  correctly flagging that a freely available backup already provides
+  more value than drafting him would. What breaks if you skip VBD and
+  sort by raw points: you draft backup-caliber QBs and mid-tier QBs far
+  too early relative to their actual replacement-adjusted value, while
+  underrating positions like TE where even a modest edge over a weak
+  replacement level is worth real draft capital.
+- Tiers: median gap + 3*MAD per position, not mean + std, chosen
+  specifically because mean/std are self-referential on small-n
+  positions (the single largest gap inflates the std used to judge
+  whether that same gap clears the threshold). Verified this actually
+  matters on real data, not just in theory: QB's gap list has one huge
+  outlier (28.2, against a median gap of just 1.98), and the MAD stayed
+  small (1.67) instead of being dragged up by it, giving a threshold
+  (6.99) that still meaningfully separates real tier breaks from normal
+  week-to-week noise. Same pattern at TE (two early outlier gaps, 22.1
+  and 15.4, median gap 0.53, MAD stayed at 0.42, threshold 1.79). Both
+  positions produced tier counts in the same ballpark as RB/WR relative
+  to their player counts (roughly 5 players per tier on average across
+  all four positions), no sign of the collapse-to-1-2-tiers failure mode
+  mean+std would have risked.
