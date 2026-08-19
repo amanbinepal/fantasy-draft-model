@@ -148,3 +148,50 @@ project later: not just what the code does, but why I chose it.
   feature season only and never re-checked against the target season, so
   a mid-career position change (rare, but real) would carry a stale
   position label forward into that training row.
+
+## 2026-08-19: Phase 3, model.py
+
+- Ridge regression, fit separately per position (QB/RB/WR/TE), each with
+  its own feature subset instead of one uniform list: QB gets passing +
+  rushing columns (no receiving), RB/WR get rushing + receiving (no
+  passing), TE gets receiving only (no passing or rushing, TE rushing
+  usage is negligible enough not to carry even as a near-constant
+  column). Chose Ridge over a more flexible model like XGBoost because
+  these training sets are small, a few hundred to ~1400 rows per
+  position, small enough that a flexible model would likely fit noise
+  that doesn't generalize. Ridge's L2 penalty shrinks noisy coefficients
+  toward zero instead.
+- Wrapped each position's model in a Pipeline(StandardScaler, RidgeCV):
+  scaling first because the penalty only makes sense when features are
+  on a comparable scale (passing_yards in the hundreds vs.
+  passing_interceptions under 5, an unscaled penalty would shrink the
+  large-scale column unfairly hard), RidgeCV so alpha gets picked per
+  position via built-in leave-one-out CV instead of one hand-picked
+  number, since QB's ~476 rows and WR's ~1400 plausibly want different
+  amounts of shrinkage. Known limitation: that CV assumes roughly
+  independent rows, but the same player contributes a row per season
+  pair (e.g. Tom Brady's 2019 and 2020 rows both exist), so folds aren't
+  fully independent. Affects alpha selection only, not the held-out
+  evaluation, which splits by season, not row. Phase 4's walk-forward
+  backtest is the real generalization check regardless of how alpha got
+  picked here.
+- Naive baseline: a player's own fantasy_points total from their feature
+  season, unchanged, as the prediction for next season ("assume it
+  repeats"). Notably, this exact number is also one of Ridge's own input
+  features for every position, so Ridge isn't blind to it, it has full
+  ability to learn a coefficient near 1 on that column and near 0 on
+  everything else if that were truly optimal.
+- Evaluated on a single forward-chaining split (train: target_season <=
+  2024, test: target_season == 2025) rather than a random split, so nothing
+  from the test season touches training. Real result, not hidden: Ridge
+  beat naive on MAE for WR (33.24 vs. 37.23) and TE (25.03 vs. 27.53), but
+  lost narrowly at QB (61.68 vs. 60.83, n=78) and RB (40.76 vs. 39.48,
+  n=148). Spearman rank correlation tells a slightly different story,
+  Ridge is ahead at QB (0.733 vs. 0.726) despite losing on MAE, and only
+  barely behind at RB (0.738 vs. 0.746), so the ranking-quality picture is
+  closer to a wash than the MAE numbers alone suggest. Not chasing a fix
+  for this today: QB and RB's test sets are thin enough (78 and 148 rows,
+  one single season) that this could easily flip on a different fold, and
+  Phase 4's full walk-forward (every season as its own test fold, not
+  just one) is the real answer to whether Ridge is actually earning its
+  complexity over the naive baseline.

@@ -9,3 +9,4 @@ dependencies:
   - pyyaml
   - requests
   - pyarrow
+  - scikit-learn
