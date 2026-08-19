@@ -195,3 +195,60 @@ project later: not just what the code does, but why I chose it.
   Phase 4's full walk-forward (every season as its own test fold, not
   just one) is the real answer to whether Ridge is actually earning its
   complexity over the naive baseline.
+
+## 2026-08-19: Phase 3, ecr_blend.py
+
+- FantasyPros' free API tier turned out to only return sample/non-
+  production data (real access needs an $8.99/mo HOF subscription), so
+  used the manual CSV cheat-sheet export instead, per PROJECT_PLAN.md's
+  stated fallback: `data/raw/fantasypros_ecr.csv`. No points column at
+  all, rank only (`RK`, `TIERS`, `POS` as position + positional rank
+  combined like `"WR12"`).
+- Blend mechanics: since ECR has no points but Phase 5's VBD math needs
+  real point values, `ecr_implied_points` for a player ECR ranks Nth at
+  a position is whatever value sits at Ridge's own Nth spot in that
+  position's sorted projection list, not Ridge's own specific prediction
+  for that named player. That distinction is the entire mechanism: using
+  the player's own Ridge number instead would make `ecr_implied_points`
+  identically equal `ridge_points` for everyone, so ECR's actual rank
+  would never factor into the computation and the blend would collapse
+  to Ridge alone regardless of weight. Blend weight: 0.5 (equal), a
+  starting point with no a priori claim either source is more trustworthy,
+  to be tuned once Phase 4's backtest exists.
+- Matching: normalized name (lowercase, punctuation stripped, Jr./Sr./
+  II/III/IV stripped) matched across all positions, not scoped to
+  matching position, since a position disagreement between ECR and our
+  stale 2025 label is a real signal (ECR's more current), not noise.
+  Fell back to `difflib` fuzzy matching, team-restricted when team is
+  known, for anything without an exact name match. Real results: QB
+  47/0/5 (exact/fuzzy/unmatched), RB 107/1/30, TE 64/0/14, WR 131/2/42.
+  Only 3 fuzzy matches total (Audric Estime, Joshua Palmer, Mitch
+  Tinsley), spot-checked, all correct. Most unmatched rows are genuine
+  2026 rookies with no 2025 stat-line presence at all (Jeremiyah Love,
+  Carnell Tate, Jonathon Brooks, ...), exactly the case the design
+  intends to fall back to ECR-implied-points-alone for.
+- Team-code normalization (`JAC`->`JAX`, `LAR`->`LA`): confirmed real by
+  diffing both team-code sets directly, but its measured rescue count on
+  this actual export is 0, not a bug, a mechanical fact. Team only gets
+  consulted for tie-breaking a name that matches multiple candidates, or
+  restricting the fuzzy-fallback candidate pool. Checked all 29 matched
+  JAC/LAR rows directly: every one resolved via a unique exact name
+  match, so team normalization never had a case where it was actually
+  needed to matter. Kept the mapping anyway, it's still factually
+  correct and could matter on a future export where a name collision or
+  fuzzy case happens to land on a Jacksonville or Rams player.
+- Caught and fixed a real bug in my own verification step while
+  computing that rescue count: `matched['player_id'] != matched_raw['player_id']`
+  is `NaN != NaN` in pandas, which evaluates `True`, not `False`, so
+  every row unmatched in both the normalized and raw-team runs (mostly
+  rookies, unrelated to team codes at all) was being counted as
+  "changed." First run reported 91 rescued rows; the real number, after
+  excluding the both-null case explicitly, is 0. Worth remembering:
+  never diff nullable columns with a plain `!=` in pandas without
+  handling the both-null case first.
+- Flagged, not fixed today: Travis Hunter (Jacksonville, a real 2025
+  two-way rookie) shows up unmatched, plausibly because nflverse
+  classifies him primarily by his defensive position (CB), which
+  `current_player_pool`'s offense-position filter excludes even though
+  he has real offensive stats too. A different issue than team
+  normalization, noted for later, not chased down now.
