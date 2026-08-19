@@ -70,3 +70,35 @@ project later: not just what the code does, but why I chose it.
   shorter TD in the same game and this would over-credit them), but a
   real, mostly-solved approximation instead of a placeholder, ready for
   scoring.py in Phase 3.
+
+## 2026-08-19: Phase 2, scoring.py
+
+- Last session's Sleeper scoring findings never got saved anywhere, just
+  written up as prose in this file, so scoring.py couldn't be built
+  without re-fetching. Added sleeper_api.py to pull the league's real
+  `scoring_settings` and cache it to `data/raw/league_scoring_settings.json`
+  with no refresh path: unlike weekly stats, a league's scoring settings
+  are fixed once the league is created for the season, so a stale cache
+  isn't a real risk here.
+- Full scoring weights, not just the pieces checked before: standard PPR
+  shape (`rec`: 1.0, `pass_yd`: 0.04, `rush_yd`/`rec_yd`: 0.1, `pass_td`:
+  4.0, `rush_td`/`rec_td`: 6.0, `pass_int`/`fum_lost`: -2.0 each), plus
+  one real surprise: 2-point conversions score 1.0 here, not the more
+  common 2.0. Also confirmed `pass_int` and `fum_lost` come back negative
+  from Sleeper directly, not positive magnitudes scoring.py has to negate
+  itself.
+- `fum_lost` is one Sleeper key but three nflverse columns
+  (`rushing_fumbles_lost`, `receiving_fumbles_lost`, `sack_fumbles_lost`),
+  since Sleeper scores total fumbles lost regardless of how the ball came
+  out. Summed all three under that one weight.
+- Kept the 40+ yard TD bonus approximation from Phase 0/1 but scaled it:
+  `2 * min(tds, 40+ yard plays)` per category per game instead of a flat
+  flag, so a real two-40+-TD game doesn't get under-credited. Confirmed
+  against Mark Ingram's 2019 week 1 (2 rush TDs, 1 rushing 40+ play): our
+  score came out exactly 2.0 above nflverse's own PPR calc for that game,
+  the expected single bonus. Still has the same known edge case as
+  before, just named precisely now: a game with one short (non-40+) TD
+  and a separate, unrelated 40+ yard play that wasn't a score still
+  computes as `min(1, 1) = 1` and gets a bonus it shouldn't, because the
+  count-only `passing_40`/`rushing_40`/`receiving_40` columns can't tell
+  us the 40+ play and the scoring play were different plays.
