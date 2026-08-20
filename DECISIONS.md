@@ -860,3 +860,82 @@ project later: not just what the code does, but why I chose it.
   idea (a real, named roster-construction preference encoded directly),
   and this fix is more of that same spirit, not a new system. Revisit
   as a real feature next season, not tonight.
+
+## 2026-08-20: Fourth mock draft, floor-aware ranking, QB bench deprioritization, watchlist
+
+- Ran a fourth mock draft (`1396021995581239296`, complete), reviewed
+  against all 14 real picks like every prior mock. Two real, distinct
+  refinements confirmed with real numbers, plus a new feature.
+- QB2 in round 9 again, but a genuinely different cause than last
+  mock's dynamic-inflation bug: this time QB's *static* value (25.7)
+  was honestly the highest of all four positions at that moment. Not a
+  bug, a real gap in what VBD can see: a backup QB has almost no
+  realistic bench utility in this single-QB, no-superflex league, it
+  can never fill a FLEX slot the way bench RB/WR/TE can, so comparing
+  it on equal footing with flex-eligible bench value is apples to
+  oranges. Confirmed real: excluding QB from that comparison at that
+  exact state surfaces Travis Kelce (real starter-caliber TE) instead.
+- Separately, Wan'Dale Robinson in round 6 won the *needed* branch's
+  then-uniform dynamic-value ranking even though WR's own floor was
+  already met there (only flex-competing), while QB and TE's own floors
+  were genuinely still unmet. Dynamic value's justification only holds
+  for a genuinely unmet floor. Confirmed: per-position floor-aware
+  value surfaces Kyle Pitts (real unmet TE floor) instead.
+- Checked the other two named "reaches" (Jauan Jennings, Keenan Allen,
+  rounds 13-14) against the same theories before assuming either
+  applied: neither did, static WR already won there too even before any
+  fix, genuinely thin-scraps territory by round 13-14 regardless of
+  method, same pattern as the third mock, not a new issue.
+- Fix, `src/recommend.py`: replaced the needed-vs-fallback branch split
+  with one unified rule, applied per position: dynamic `vbd_value`
+  while a position's own required count is genuinely unmet, static
+  `static_vbd_value` once that floor is met, whether flex-competing or
+  fully in bench mode. `needs`/reason text unchanged, only how `top`
+  gets picked changed.
+- New `config.yaml`, `league.bench_deprioritize_until_pick: {QB: 12}`:
+  once a position's own floor is met and it has no FLEX path (today,
+  just QB), it's excluded from the *primary* comparison until this many
+  of my own picks have happened, with a safety net so it's never
+  excluded outright, a 2nd QB still gets recommended eventually, just
+  genuinely late. `12` is a hand-picked strategy parameter, not
+  mechanically derived, same honest category as `draft_caps` (already
+  logged as such): recent mocks' QB2 kept landing around round 8-9,
+  this pushes it into clear late-bench territory while leaving room to
+  win earlier if truly nothing else is left.
+- Caught and fixed a real regression during verification, before it
+  ever got committed: the first rewrite dropped the `needed_positions`
+  restriction on the candidate pool entirely, only caught because
+  `recommend.py`'s own "flex capacity full" demo scenario started
+  recommending a bench WR over a still-genuinely-required QB. Restored
+  the restriction (`scope_board`), re-verified all three demo scenarios
+  and the real fourth-draft replay again afterward. Concrete evidence
+  the demo scenarios earn their keep as a real regression check, not
+  just a nice-to-have.
+- Verified against the real 14-pick replay: round 9 now recommends
+  Travis Kelce, not Trevor Lawrence, reason shows the deprioritized
+  clause explicitly; round 6 recommends Kyle Pitts, not Wan'Dale
+  Robinson; rounds 1-4, 7-8 unchanged. One honest surprise, not
+  predicted going in: round 5 flipped from Jameson Williams to Drake
+  Maye. Traced it directly: QB and WR were an exact dynamic-value tie
+  there (62.7 each) under the old uniform logic, WR won the tiebreak by
+  coincidence; under the fix WR's already-met floor drops it to static
+  (33.9), QB's genuinely unmet floor keeps it dynamic (62.7), QB now
+  wins outright instead of by luck. A real, deliberate consequence of
+  the fix, not a bug, but genuinely not something traced through before
+  implementing, worth naming plainly rather than glossing past.
+- New feature, `data/watchlist.yaml` + `src/live_tracker.py`: a
+  hand-maintained list of players to be wary of on team-situation/ADP
+  grounds (De'Von Achane, Jeremiyah Love, Chris Olave, DeVonta Smith,
+  TreVeyon Henderson, Jameson Williams, Travis Kelce to start), exactly
+  the kind of context PROJECT_PLAN.md itself says the model
+  structurally can't see. `load_watchlist()` reuses
+  `ecr_blend.normalize_name`, the same matching approach already proven
+  on ECR and live-pick matching, wired into `build_tracker_board()`.
+  Deliberately a visible flag only, never touches VBD, ranking, needs,
+  or caps: this is about giving more context for a personal judgment
+  call, not automating one. Verified all 7 real names matched correctly
+  against the current board, and that the warning actually printed at
+  the real De'Von Achane and Travis Kelce picks when replayed. Also ran
+  a full `run_tracker` smoke test against the completed draft (140
+  picks, 14 mine, 0 unresolved) to confirm nothing crashes with the new
+  column threaded through the live poll loop end to end.
