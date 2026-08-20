@@ -167,6 +167,53 @@ def assign_tiers(vbd_df, mad_multiplier=TIER_GAP_MAD_MULTIPLIER):
     return result, gap_debug
 
 
+def recompute_dynamic_vbd(available, config):
+    """Re-run replacement_level/vbd_value/tier against only the
+    currently-available pool: the same compute_vbd/assign_tiers
+    methodology build_tracker_board used once at startup, re-applied to
+    who's actually still on the board instead of the frozen full
+    pre-draft class.
+
+    Why this exists: a real mock draft (Aug 19, DECISIONS.md) showed RB
+    getting drafted about 3x faster than QB/TE, so by mid-draft the
+    static replacement level, anchored to the original full class,
+    stopped reflecting what was actually achievable at RB if you waited,
+    while QB/TE's stayed roughly meaningful. Re-ranking only the
+    survivors against the same fixed roster-shape demand
+    (fixed[position]/flex_slots from config, unaffected by who's been
+    drafted) corrects for that automatically. Not a new heuristic, the
+    same principled function, just kept current instead of frozen at
+    minute zero.
+
+    `available`'s incoming vbd_value/tier/replacement_level (the static,
+    build-time values already on it) are preserved under static_* names
+    before being overwritten, so both stay visible side by side on
+    purpose: the pre-draft number is still worth seeing, not just the
+    live one.
+    """
+    static_cols = available[["replacement_level", "vbd_value", "tier"]].rename(columns={
+        "replacement_level": "static_replacement_level",
+        "vbd_value": "static_vbd_value",
+        "tier": "static_tier",
+    })
+
+    # Just position/blended_points, not the full `available`: compute_vbd
+    # writes vbd_value/tier/replacement_level directly onto whatever it's
+    # given, and available already carries those columns under the static
+    # values above. Starting from a minimal frame avoids that collision
+    # entirely rather than having to untangle it after the fact.
+    minimal = available[["position", "blended_points"]].copy()
+    dynamic, _replacement, _startable = compute_vbd(minimal, config)
+    dynamic, _gap_debug = assign_tiers(dynamic)
+
+    result = available.copy()
+    result["replacement_level"] = dynamic["replacement_level"]
+    result["vbd_value"] = dynamic["vbd_value"]
+    result["tier"] = dynamic["tier"]
+    result[["static_replacement_level", "static_vbd_value", "static_tier"]] = static_cols
+    return result
+
+
 def _build_blended_table():
     """Reruns the full chain (cached at every stage) to get the current
     blended projection table. Same pattern every prior file's main block

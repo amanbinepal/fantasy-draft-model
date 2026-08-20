@@ -38,7 +38,7 @@ from src.data_pipeline import pull_weekly_stats
 from src.ecr_blend import current_player_pool, normalize_name, normalize_team
 from src.recommend import recommend_next_pick
 from src.sleeper_api import pull_draft_metadata, pull_draft_picks, pull_user_id
-from src.vbd import _build_blended_table, assign_tiers, compute_vbd
+from src.vbd import _build_blended_table, assign_tiers, compute_vbd, recompute_dynamic_vbd
 
 POLL_INTERVAL_SECONDS = 5
 FUZZY_CUTOFF = 0.85  # matches ecr_blend.py's cutoff, same reasoning
@@ -132,13 +132,18 @@ def _print_unresolved(unresolved_picks):
 def _print_recommendation(available, my_positions, config):
     """The one highlighted answer at the top of every cycle, not a list
     to interpret. Printed every cycle, not just when a new pick lands:
-    it should be answerable at a glance at any moment mid-draft."""
+    it should be answerable at a glance at any moment mid-draft.
+    vbd_value/tier are the dynamic, re-baselined-to-the-current-pool
+    values (recompute_dynamic_vbd); the static figure is shown alongside
+    since the pre-draft number is still worth seeing, not just the live
+    one."""
     top, needs, reason = recommend_next_pick(available, my_positions, config)
     print("*** RECOMMENDED NEXT PICK ***")
     if top is not None:
         print(
             f"    {top['player_display_name']} ({top['position']}), "
-            f"vbd_value={top['vbd_value']:.1f}, tier {top['tier']}"
+            f"vbd_value={top['vbd_value']:.1f} (static {top['static_vbd_value']:.1f}), "
+            f"tier {top['tier']} (static {top['static_tier']})"
         )
     print(f"    Reason: {reason}")
 
@@ -156,6 +161,15 @@ def run_tracker(draft_id, board, config, my_draft_slot,
     unresolved_picks = []
     consecutive_failures = 0
 
+    # available carries the dynamic, re-baselined-each-cycle VBD/tier
+    # (recompute_dynamic_vbd), and persists across iterations rather than
+    # getting rebuilt from `board` every cycle: rebuilding from `board`
+    # would silently drop the dynamic columns back to static and force a
+    # redundant recompute every poll even when nothing changed. Only
+    # refreshed below when this cycle's picks actually shrink the pool.
+    # Dynamic == static at pick 0, nothing's been drafted yet.
+    available = recompute_dynamic_vbd(board, config)
+
     print(f"Tracking draft {draft_id}, polling every {poll_interval}s. Ctrl+C to stop.")
 
     iterations = 0
@@ -172,7 +186,8 @@ def run_tracker(draft_id, board, config, my_draft_slot,
                     f"{exc}. Retrying in {poll_interval}s."
                 )
                 _print_unresolved(unresolved_picks)
-                available = board[~board.index.isin(drafted_indices)]
+                # Reuse the persisted, dynamically-scored `available` as-is:
+                # nothing about the pool changed, just the poll failed.
                 my_positions = board.loc[list(my_drafted_indices), "position"]
                 _print_recommendation(available, my_positions, config)
                 if max_iterations is None or iterations < max_iterations:
@@ -182,20 +197,24 @@ def run_tracker(draft_id, board, config, my_draft_slot,
             new_picks = picks[picks["pick_no"] > last_seen_pick_no]
 
             if len(new_picks):
-                available = board[~board.index.isin(drafted_indices)]
+                # Plain, unscored view for matching/removal against, kept
+                # distinct from the persisted, dynamically-scored `available`
+                # below: match_pick only ever reads normalized_name/team, it
+                # doesn't care about vbd_value/tier at all.
+                working = board[~board.index.isin(drafted_indices)]
                 pick_lines = []  # buffered, not printed yet: the recommendation
                 # must print before these per-pick details, per PROJECT_PLAN.md's
                 # "one highlighted answer at the top," but still needs to be
                 # computed *after* this cycle's picks are processed, using the
                 # up-to-date pool/roster, not a stale pre-cycle state.
                 for _, pick in new_picks.iterrows():
-                    idx, match_type = match_pick(pick, available)
+                    idx, match_type = match_pick(pick, working)
                     name = f"{pick['first_name']} {pick['last_name']}"
                     if idx is not None:
                         drafted_indices.add(idx)
                         if pick["draft_slot"] == my_draft_slot:
                             my_drafted_indices.add(idx)
-                        available = available.drop(index=idx)
+                        working = working.drop(index=idx)
                         pick_lines.append(
                             f"Pick {pick['pick_no']}: {name} ({pick['position']}, "
                             f"{pick['team']}) -> matched [{match_type}], removed from pool"
@@ -212,6 +231,10 @@ def run_tracker(draft_id, board, config, my_draft_slot,
 
                 last_seen_pick_no = picks["pick_no"].max()
 
+                # Only re-baseline VBD when the pool actually changed, not
+                # every poll: cheap, but no reason to redo it for nothing.
+                available = recompute_dynamic_vbd(working, config)
+
                 _print_unresolved(unresolved_picks)
                 my_positions = board.loc[list(my_drafted_indices), "position"]
                 _print_recommendation(available, my_positions, config)
@@ -219,13 +242,17 @@ def run_tracker(draft_id, board, config, my_draft_slot,
                 for line in pick_lines:
                     print(line)
                 print()
-                print("=== Top 10 available by VBD ===")
+                print("=== Top 10 available by VBD (dynamic, static alongside) ===")
                 top10 = available.sort_values("vbd_value", ascending=False).head(10)
-                print(top10[["player_display_name", "position", "vbd_value", "tier"]].to_string(index=False))
+                print(top10[[
+                    "player_display_name", "position",
+                    "vbd_value", "static_vbd_value", "tier", "static_tier",
+                ]].to_string(index=False))
                 print()
             else:
                 _print_unresolved(unresolved_picks)
-                available = board[~board.index.isin(drafted_indices)]
+                # Reuse the persisted, dynamically-scored `available` as-is:
+                # the pool hasn't changed since the last cycle that did.
                 my_positions = board.loc[list(my_drafted_indices), "position"]
                 _print_recommendation(available, my_positions, config)
                 print(f"[poll] no new picks ({len(picks)} total so far)")
