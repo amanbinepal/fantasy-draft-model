@@ -31,8 +31,10 @@ up everything that accumulated since the last one.
 import difflib
 import sys
 import time
+from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from src.data_pipeline import pull_weekly_stats
 from src.ecr_blend import current_player_pool, normalize_name, normalize_team
@@ -42,17 +44,38 @@ from src.vbd import _build_blended_table, assign_tiers, compute_vbd, recompute_d
 
 POLL_INTERVAL_SECONDS = 5
 FUZZY_CUTOFF = 0.85  # matches ecr_blend.py's cutoff, same reasoning
+WATCHLIST_PATH = "data/watchlist.yaml"
+
+
+def load_watchlist(path=WATCHLIST_PATH):
+    """Hand-maintained personal risk list (team situation, ADP concerns,
+    depth-chart battles, ...), not derived from any model: PROJECT_PLAN.md's
+    own words, the part the model structurally can't see. Missing file
+    means an empty watchlist, not an error, this is optional context, not
+    a Phase requirement. Purely a visible flag, never touches VBD,
+    ranking, needs, or caps: it's context for a personal judgment call,
+    not automation of one."""
+    if not Path(path).exists():
+        return {}
+    with open(path) as f:
+        raw = yaml.safe_load(f) or {}
+    return {normalize_name(name): note for name, note in raw.items()}
 
 
 def build_tracker_board():
     """The VBD+tier board, built once, enriched with normalized_name and
-    team/normalized_team for matching against live picks."""
+    team/normalized_team for matching against live picks, plus the
+    watchlist flag/note for display."""
     blended, config = _build_blended_table()
     vbd_df, _replacement, _startable = compute_vbd(blended, config)
     vbd_df, _gap_debug = assign_tiers(vbd_df)
 
     board = vbd_df.reset_index(drop=True)
     board["normalized_name"] = board["player_display_name"].apply(normalize_name)
+
+    watchlist = load_watchlist()
+    board["on_watchlist"] = board["normalized_name"].isin(watchlist.keys())
+    board["watchlist_note"] = board["normalized_name"].map(watchlist).fillna("")
 
     seasons = config["data"]["seasons"]
     current_season = max(seasons)
@@ -145,6 +168,9 @@ def _print_recommendation(available, my_positions, config):
             f"vbd_value={top['vbd_value']:.1f} (static {top['static_vbd_value']:.1f}), "
             f"tier {top['tier']} (static {top['static_tier']})"
         )
+        if top.get("on_watchlist"):
+            note = f": {top['watchlist_note']}" if top["watchlist_note"] else ""
+            print(f"    /!\\ ON YOUR WATCHLIST{note}")
     print(f"    Reason: {reason}")
 
 
@@ -247,6 +273,7 @@ def run_tracker(draft_id, board, config, my_draft_slot,
                 print(top10[[
                     "player_display_name", "position",
                     "vbd_value", "static_vbd_value", "tier", "static_tier",
+                    "on_watchlist",
                 ]].to_string(index=False))
                 print()
             else:
