@@ -806,3 +806,57 @@ project later: not just what the code does, but why I chose it.
   because that scenario's own TE floor genuinely was met (1 TE, 1
   required), distinct from the real bug case (0 TE), confirming the fix
   tells those two situations apart rather than collapsing them.
+
+## 2026-08-20: Third mock draft, dynamic VBD overreaching in bench mode
+
+- Ran a third mock draft (`1396010749167435776`, complete). Roster
+  construction looked right this time (caps held: exactly 2 QB, 2 TE),
+  but two picks felt like reaches: a second QB (Trevor Lawrence) taken
+  round 9, one round after the first, and a running back (Tyrone Tracy)
+  in round 12. Reviewed by replaying all 14 real picks against the live
+  code: every single one matched the tool's own top recommendation at
+  that moment, so these had a real, traceable mechanism, not just
+  variance.
+- Both reaches landed in the "all starting slots filled, best available"
+  fallback branch (`needs == []`) and shared the same signature: the
+  recommended player's dynamic `vbd_value` was 2-3x their static value
+  (Trevor Lawrence dynamic=85.4 vs. static=25.7, actually the *lowest*
+  static value of the four candidates at that moment; Tyrone Tracy
+  dynamic=53.6 vs. static=-22.1, genuinely below the original
+  replacement level). Root cause: dynamic VBD's whole justification
+  (logged above, Aug 19) is "don't wrongly skip a position that's
+  quietly running out, if you actually still need it." That reasoning
+  stops applying the moment every starting need is filled; from then on
+  a thin or heavily-drafted position can make a mediocre remaining
+  player look inflated purely because the remaining pool shrank, with
+  nothing left to correct it back down.
+- Checked a third named "reach" (Jauan Jennings, round 14) against the
+  same theory before assuming it was the same bug: it wasn't. Static WR
+  already beat static RB there even with QB/TE capped out, it's genuinely
+  thin-scraps territory by round 14 of a 140-pick draft regardless of
+  method. Said so plainly rather than forcing a fix onto something that
+  wasn't actually broken.
+- Fix: `recommend_next_pick` now sorts the needed-positions branch by
+  `vbd_value` (dynamic, unchanged, that's exactly where the
+  depletion-urgency correction is the right signal) and the fallback
+  branch by `static_vbd_value` instead. Falls back to `vbd_value` if
+  `static_vbd_value` isn't present, and updated `recommend.py`'s own
+  `__main__` demo to build its board through `recompute_dynamic_vbd`
+  (matching how `live_tracker.py` actually calls it) so that fallback
+  path isn't left silently unexercised.
+- Verified by replaying the real 14-pick sequence through the fix: round
+  9 now recommends Wan'Dale Robinson instead of Trevor Lawrence, round
+  12 recommends Deebo Samuel instead of Tyrone Tracy, rounds 1-8 (the
+  needed-positions branch) are byte-identical to before, and the other
+  two bench picks (round 10, round 13) plus the round-14 pick are
+  unchanged, confirming the fix is targeted to exactly the case it was
+  meant for.
+- Discussed, not built: whether to add real draft-strategy modes (Zero-RB,
+  Hero-RB, etc.) as a switchable pre-draft setting. Decided against for
+  this close to draft day: a bigger, more speculative feature with real
+  design surface (how it reweights VBD, how it interacts with caps and
+  dynamic re-baselining) that isn't worth the risk introducing untested
+  this late. `draft_caps` is already a lightweight version of the same
+  idea (a real, named roster-construction preference encoded directly),
+  and this fix is more of that same spirit, not a new system. Revisit
+  as a real feature next season, not tonight.
