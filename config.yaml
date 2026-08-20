@@ -23,6 +23,17 @@ league:
   draft_caps:
     QB: 2
     TE: 2
+  # Positions with no FLEX path (today: just QB, this league has no
+  # superflex) offer close to zero real bench value once their own
+  # floor is met: a backup QB only ever plays a bye/injury week, unlike
+  # bench RB/WR/TE, which can fill either FLEX slot any week. Excluded
+  # from the *primary* bench-value comparison until this many of my own
+  # picks have happened, not forever, a 2nd QB still gets recommended
+  # eventually, just genuinely late. Hand-picked, not derived, same
+  # honest category as draft_caps: recent mocks' QB2 kept landing
+  # around round 8-9, this pushes it into clear late-bench territory.
+  bench_deprioritize_until_pick:
+    QB: 12
 
 data:
   seasons: [2019, 2020, 2021, 2022, 2023, 2024, 2025]

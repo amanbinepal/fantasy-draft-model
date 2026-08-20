@@ -51,58 +51,98 @@ def roster_needs(my_positions, config):
 
 
 def recommend_next_pick(available_board, my_positions, config):
-    """Filter to still-needed positions, recommend the highest-VBD
-    player among them. Falls back to best-available on the whole board
-    if no starting need remains. Returns (recommended_row_or_None,
-    needs_dict, reason_string).
+    """Recommend the best-value player among still-eligible positions.
+    Returns (recommended_row_or_None, needs_dict, reason_string).
+
+    Ranking is unified around each position's own floor status, not a
+    needed-vs-fallback branch split: a position uses dynamic vbd_value
+    while its own required count is genuinely unmet (don't wrongly skip
+    a position that's quietly running out, if it's actually still
+    required), and static_vbd_value once that floor is met, whether it's
+    only competing for a shared FLEX slot or fully in bench/depth mode.
+    Confirmed real, not theoretical: a real mock draft's needed branch
+    let a WR (own floor already met, only flex-competing) win on dynamic
+    value over a TE with a genuinely unmet floor, purely because the WR
+    pool happened to be thinner at that moment; per-position floor
+    status fixes that directly. `needs`/reason text stay exactly what
+    they were, this only changes how `top` gets picked.
 
     draft_caps (config.yaml, league.draft_caps, e.g. {"QB": 2}) exclude
-    a position from consideration entirely, in both branches below, once
-    its count is reached, regardless of remaining VBD value: a strategy
-    preference (last season's own roster construction), not something
-    derivable from the roster shape the way `needs` is, so kept as a
-    separate, explicit filtering step rather than folded into
-    roster_needs itself."""
+    a position from consideration entirely once its count is reached,
+    regardless of value: a strategy preference (last season's own roster
+    construction), not derivable from the roster shape the way `needs`
+    is, kept as a separate, explicit filtering step.
+
+    bench_deprioritize_until_pick (config.yaml, league, e.g. {"QB": 12})
+    additionally excludes a position, once its own floor is met, from
+    the *primary* comparison until this many of my own picks have
+    happened: positions with no FLEX path (today, just QB, this league
+    has no superflex) offer close to zero real bench value once their
+    floor is met, a backup QB only ever plays a bye/injury week, unlike
+    bench RB/WR/TE, which can fill either FLEX slot any week. Confirmed
+    real: a mock draft's backup QB won the bench comparison on raw
+    static value alone despite that. Deprioritized, not excluded
+    outright, there's a safety net below so it never actually returns
+    "nothing left" over this, and it re-enters normally past the
+    configured pick count, so a 2nd QB still gets recommended
+    eventually, just genuinely late."""
+    roster = config["league"]["roster"]
     needs = roster_needs(my_positions, config)
     counts = {}
     for position in my_positions:
         counts[position] = counts.get(position, 0) + 1
+
+    floor_met = {"QB": counts.get("QB", 0) >= roster["QB"]}
+    floor_met.update({p: counts.get(p, 0) >= roster[p] for p in FLEX_ELIGIBLE})
+
     caps = config["league"].get("draft_caps", {})
     at_cap = {position for position, cap in caps.items() if counts.get(position, 0) >= cap}
-
     eligible_board = available_board[~available_board["position"].isin(at_cap)]
+
     needed_positions = [
         position for position, needed in needs.items() if needed and position not in at_cap
     ]
+    # Real starting need still restricts candidates to just those
+    # positions, same as before, this is the core "roster-need-aware, not
+    # a raw sorted list" behavior from Phase 6: only fall through to the
+    # whole eligible board once no genuine starting need remains.
+    scope_board = eligible_board[eligible_board["position"].isin(needed_positions)] \
+        if needed_positions else eligible_board
+
+    deprioritize_until = config["league"].get("bench_deprioritize_until_pick", {})
+    pick_number = len(my_positions) + 1
+    deprioritized = {
+        position for position, until_pick in deprioritize_until.items()
+        if floor_met.get(position, False) and pick_number < until_pick
+    }
+    primary_board = scope_board[~scope_board["position"].isin(deprioritized)]
+    # Safety net: never actually return "nothing left" just because the
+    # only remaining players happen to be in a deprioritized position.
+    candidate_pool = primary_board if len(primary_board) > 0 else scope_board
 
     if needed_positions:
-        candidates = eligible_board[eligible_board["position"].isin(needed_positions)]
         reason = f"starting slot(s) still open at: {', '.join(needed_positions)}"
-        sort_col = "vbd_value"
     else:
-        candidates = eligible_board
         reason = "all starting slots filled, best player available (bench/depth value)"
-        # Dynamic vbd_value's justification (don't wrongly skip a position
-        # that's quietly running out) only applies while a real starting
-        # need remains. Once needs is empty, that risk is gone; sort by the
-        # static value instead: who's actually good against the fixed
-        # baseline, not who looks inflated because their remaining pool
-        # happens to be thin. (Real reaches this fixes, not theoretical: a
-        # real third mock draft took a backup QB in round 9 and a -22.1
-        # static-value RB in round 12, both purely because their thin,
-        # heavily-drafted pools had inflated their dynamic value 2-3x over
-        # their static one, confirmed against real pick data.) Falls back
-        # to vbd_value if static_vbd_value isn't present (a plain static
-        # board, not run through recompute_dynamic_vbd).
-        sort_col = "static_vbd_value" if "static_vbd_value" in candidates.columns else "vbd_value"
-
     if at_cap:
         reason += f" (excluded, at draft cap: {', '.join(sorted(at_cap))})"
+    if deprioritized and len(primary_board) > 0:
+        soonest = min(deprioritize_until[p] for p in deprioritized)
+        reason += f" (deprioritized until pick {soonest}: {', '.join(sorted(deprioritized))})"
 
-    if len(candidates) == 0:
+    if len(candidate_pool) == 0:
         return None, needs, "no eligible players left on the board"
 
-    top = candidates.sort_values(sort_col, ascending=False).iloc[0]
+    candidate_pool = candidate_pool.copy()
+    is_floor_met = candidate_pool["position"].map(floor_met).fillna(True)
+    if "static_vbd_value" in candidate_pool.columns:
+        candidate_pool["_effective_value"] = candidate_pool["vbd_value"].where(
+            ~is_floor_met, candidate_pool["static_vbd_value"]
+        )
+    else:
+        candidate_pool["_effective_value"] = candidate_pool["vbd_value"]
+
+    top = candidate_pool.sort_values("_effective_value", ascending=False).iloc[0]
     return top, needs, reason
 
 
