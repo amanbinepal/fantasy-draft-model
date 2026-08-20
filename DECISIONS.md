@@ -683,3 +683,73 @@ project later: not just what the code does, but why I chose it.
   replay-verification above; the original live run's own recommendation
   log (before the fix) is a real artifact of a real bug, not a valid
   read on the tool's actual roster-need-aware behavior.
+
+## 2026-08-19: Dynamic VBD re-baselining (Option B), closing the static-baseline finding
+
+- Worked through two candidate fixes for the static-VBD-baseline finding
+  logged above before building anything: (A) leave VBD alone, bolt a
+  separate "positional run" warning on top, or (B) re-apply the existing
+  replacement-level methodology continuously, to who's actually still on
+  the board, instead of freezing it at minute zero. Went with B. A would
+  have needed a new, hand-picked depletion threshold with no backtest
+  evidence behind it, exactly the kind of arbitrary sensitivity constant
+  this project has deliberately avoided elsewhere (the ECR blend weight
+  and tier-MAD decisions both reasoned around this same trap). B reuses
+  `compute_replacement_levels`/`compute_vbd`/`assign_tiers` unchanged,
+  just re-run against the shrinking available pool instead of the frozen
+  full class, no new tunable constant at all.
+- Decided to keep both static (frozen, pre-draft) and dynamic (live,
+  recomputed) VBD visible side by side rather than replace one with the
+  other: the comparison itself ("this was a first-rounder on paper, the
+  board's live value has him at X now") is worth seeing mid-draft, not
+  just the current number alone.
+- Found and fixed one real crash risk before wiring this in, not
+  discovered after: `compute_replacement_levels`'s QB line
+  (`qb.iloc[fixed["QB"] - 1]`) is a bare scalar `.iloc` access, which
+  `IndexError`s once available QBs drop below `fixed["QB"]`, impossible
+  against the full pre-draft pool (today's only caller) but a real risk
+  once this same function runs against a live, shrinking pool. Checked
+  the RB/WR/TE combined path separately: it only ever uses slice
+  notation, which degrades to fewer/zero rows instead of raising, no
+  guard needed there. Added an explicit floor for QB: below
+  `fixed["QB"]` available, use the worst remaining QB's own value (so
+  survivors' vbd_value bottoms out near 0); at zero available, `None`
+  (no QB rows exist to map it onto either way). Verified with a
+  synthetic pool since real draft data won't naturally shrink a position
+  below its fixed count within one 10-team mock: 6 QBs floors at 250 (the
+  worst remaining), 1 QB floors at 300 (its own value, vbd_value 0), 0
+  QBs returns `None` without raising.
+- `recompute_dynamic_vbd(available, config)` (vbd.py): re-runs
+  replacement_level/vbd_value/tier against only the currently-available
+  pool, using the same `fixed[position]`/`flex_slots` demand from
+  config.yaml (real roster-shape counts, unaffected by who's been
+  drafted). Static values are preserved under `static_*` names before
+  being overwritten. Wired into `run_tracker` so the dynamically-scored
+  `available` persists across poll cycles instead of getting rebuilt
+  from `board` (which would silently drop back to static) every 5s;
+  only refreshed when a cycle's picks actually change the pool. `board`
+  itself is never mutated, stays the frozen static snapshot
+  `recommend.py`'s own `__main__` demo already expects.
+  `recommend_next_pick`/`_print_recommendation` needed no signature
+  change at all, since the dynamic values overwrite `vbd_value`/`tier`
+  under their original names, not new ones, so the recommendation
+  automatically starts using the current, re-baselined numbers.
+- Verified by replaying the same completed Aug 19 mock through the fix,
+  same approach used twice already tonight: RB recommendations went
+  from 2/140 to 42/140. At the exact pick-57/91/108/120 moments already
+  logged above, RB's vbd_value moved from deeply negative (-5.6 to
+  -22.1 static) to strongly positive (47.3 to 57.7 dynamic), confirming
+  the predicted direction and a real magnitude, not just "doesn't
+  crash." Also confirmed `board`'s static vbd_value for the first 5
+  players was byte-identical before and after the full 140-pick replay,
+  no mutation leak.
+- Real result, not softened: TE's recommendation count dropped to 0
+  (was 45 in the roster_id-fix-only replay). Checked why rather than
+  treating it as a red flag: TE was drafted more slowly than RB/QB
+  relative to its own fixed demand in this specific draft (21 TEs by
+  pick 140 against a fixed demand of 10, vs. QB's 18 against 10 and
+  RB's 45 against 20), so TE's dynamic replacement level barely moved
+  off its static baseline while RB's and QB's dropped hard. That's the
+  mechanism correctly reflecting this draft's actual depletion pattern,
+  not a new bug, but a real behavior change worth specifically watching
+  in the next live run rather than assumed to generalize from one mock.
