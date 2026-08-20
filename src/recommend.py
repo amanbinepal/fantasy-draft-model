@@ -78,9 +78,23 @@ def recommend_next_pick(available_board, my_positions, config):
     if needed_positions:
         candidates = eligible_board[eligible_board["position"].isin(needed_positions)]
         reason = f"starting slot(s) still open at: {', '.join(needed_positions)}"
+        sort_col = "vbd_value"
     else:
         candidates = eligible_board
         reason = "all starting slots filled, best player available (bench/depth value)"
+        # Dynamic vbd_value's justification (don't wrongly skip a position
+        # that's quietly running out) only applies while a real starting
+        # need remains. Once needs is empty, that risk is gone; sort by the
+        # static value instead: who's actually good against the fixed
+        # baseline, not who looks inflated because their remaining pool
+        # happens to be thin. (Real reaches this fixes, not theoretical: a
+        # real third mock draft took a backup QB in round 9 and a -22.1
+        # static-value RB in round 12, both purely because their thin,
+        # heavily-drafted pools had inflated their dynamic value 2-3x over
+        # their static one, confirmed against real pick data.) Falls back
+        # to vbd_value if static_vbd_value isn't present (a plain static
+        # board, not run through recompute_dynamic_vbd).
+        sort_col = "static_vbd_value" if "static_vbd_value" in candidates.columns else "vbd_value"
 
     if at_cap:
         reason += f" (excluded, at draft cap: {', '.join(sorted(at_cap))})"
@@ -88,7 +102,7 @@ def recommend_next_pick(available_board, my_positions, config):
     if len(candidates) == 0:
         return None, needs, "no eligible players left on the board"
 
-    top = candidates.sort_values("vbd_value", ascending=False).iloc[0]
+    top = candidates.sort_values(sort_col, ascending=False).iloc[0]
     return top, needs, reason
 
 
@@ -96,8 +110,15 @@ if __name__ == "__main__":
     # Imported here, not at module level: live_tracker imports
     # recommend_next_pick, so a module-level import here would be circular.
     from src.live_tracker import build_tracker_board
+    from src.vbd import recompute_dynamic_vbd
 
     board, config = build_tracker_board()
+    # Built the same way live_tracker.py actually feeds recommend_next_pick,
+    # not the plain static board: adds the static_* columns the bench-mode
+    # branch above reads. Dynamic == static pre-draft, so this is a no-op
+    # on the numbers here, but it means this demo actually exercises the
+    # real code path instead of only the vbd_value fallback.
+    board = recompute_dynamic_vbd(board, config)
     print(f"Board built: {len(board)} players tracked.")
 
     scenarios = {
