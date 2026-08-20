@@ -939,3 +939,39 @@ project later: not just what the code does, but why I chose it.
   a full `run_tracker` smoke test against the completed draft (140
   picks, 14 mine, 0 unresolved) to confirm nothing crashes with the new
   column threaded through the live poll loop end to end.
+
+## 2026-08-20: Watchlist, surfacing an alternative instead of just a warning
+
+- Caught mid-fifth-mock-draft (not completed, paused instead of
+  guessing): the watchlist warning fires correctly but stops at "be
+  wary," leaving "so who instead" as a manual lookup at the table, not
+  something the tool actually answers.
+- `recommend_next_pick` now returns a 4th value, `alternative`: when
+  `top` is on the watchlist, the next-best candidate from the exact
+  same `candidate_pool` (same caps, same deprioritization, same
+  needed-position scope, already ranked by the floor-aware effective
+  value) that isn't flagged. Deliberately scoped to the same pool
+  rather than a fresh, looser search, so the alternative is an equally
+  legitimate recommendation under all the same rules, not a
+  lower-quality fallback. `None` when `top` isn't watchlisted, or when
+  every remaining candidate happens to be too, rather than ever
+  inventing a worse pick to avoid an empty answer.
+- Updated both callers (`live_tracker.py`'s `_print_recommendation`,
+  `recommend.py`'s own `__main__` demo) to unpack the new 4-tuple.
+  `_print_recommendation` prints the alternative as its own line right
+  under the watchlist warning.
+- Verified concretely, not just "it didn't crash": forced Travis Kelce
+  (a real watchlist name) to be the actual top TE candidate and
+  confirmed a real alternative (Colston Loveland, not on the list)
+  surfaced with the exact intended output; confirmed the
+  all-candidates-watchlisted edge case returns `None` cleanly; re-ran
+  all three of `recommend.py`'s demo scenarios (no crash, no spurious
+  alternative line, since none of those tops are watchlisted); full
+  `run_tracker` smoke test against a completed draft (140 picks, 14
+  mine, 0 unresolved) confirms the signature change threads cleanly
+  through the whole live-poll pipeline.
+- Watchlist itself still just 7 names, no notes yet
+  (`data/watchlist.yaml`): De'Von Achane, Jeremiyah Love, Chris Olave,
+  DeVonta Smith, TreVeyon Henderson, Jameson Williams, Travis Kelce.
+  More to be added as research continues, no code change needed to
+  pick new entries up.
