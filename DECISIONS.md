@@ -601,3 +601,85 @@ project later: not just what the code does, but why I chose it.
   both rosters, exactly 3 counted as mine: QB, RB, RB). This completes
   the console-first MVP; next is Phase 7's real mock-draft dry run, not
   more features.
+
+## 2026-08-19: Phase 7, mock-draft dry run, findings and a real bug
+
+- Ran the tool against a completed 10-team, 14-round free Sleeper mock
+  draft (draft_id 1395984031421599744), using the CLI draft_id override
+  added for exactly this so config.yaml's real league draft_id never had
+  to be touched. Watching it live, the recommendation leaned hard toward
+  QB and TE, almost never toward RB, and felt like it was reaching
+  relative to real ADP. No log file was saved during the live run (just
+  console output), so both investigations below reconstruct the actual
+  recommendation history after the fact by replaying the draft's real,
+  permanent pick history (pulled straight from Sleeper's API once the
+  draft was complete) through the same board-building and matching code
+  the live run used. Same board, same matching logic, same
+  recommend_next_pick calls, just fed the real pick sequence after the
+  fact instead of live polling, a faithful reconstruction, not a
+  simulation.
+- Found a real bug this way, not a judgment call: run_tracker's
+  "is this pick mine" check compares `str(pick["roster_id"]) ==
+  str(my_roster_id)`, but roster_id is null on every single one of the
+  140 picks in a real Sleeper mock draft, confirmed directly against the
+  raw API response. resolve_my_roster_id's own resolution (`user_id ->
+  draft_order -> slot_to_roster_id`) worked fine and returned 9, the
+  check just never had anything to match against. Consequence,
+  confirmed, not assumed: my_drafted_indices stayed empty for the entire
+  draft (0 recorded, out of the 14 picks that really did land at my
+  draft slot), so roster_needs() saw an empty roster on every one of the
+  140 recommendation cycles, needs stayed `{QB: True, RB: True, WR:
+  True, TE: True}` the whole draft, never once narrowing. The
+  roster-need-aware feature, the thing PROJECT_PLAN.md calls core, not
+  optional, for this phase, never actually engaged during tonight's
+  test.
+- Root cause was the specific `slot_to_roster_id` hop: it maps draft
+  slots to synthetic ids fine within the draft metadata itself, but
+  Sleeper never stamps that value onto the actual pick objects in a mock
+  draft. `draft_slot`, by contrast, is present directly on every pick
+  object and stable per team for the whole draft (confirmed: exactly 14
+  picks at draft_slot 9, one per real round). Fixed by dropping the
+  broken hop entirely: `resolve_my_roster_id` became
+  `resolve_my_draft_slot` (`user_id -> draft_order -> my_slot`, one hop
+  instead of two), and the mine-check now compares `pick["draft_slot"]
+  == my_draft_slot` directly. Type-checked before committing to this,
+  not assumed: `draft_order`'s value is a plain int, the picks
+  dataframe's draft_slot column is int64, `==` between them works
+  correctly. Verified the fix by replaying the same real draft through
+  the corrected code: my_drafted_indices went from 0/14 to 14/14, and
+  needs now genuinely narrows over the draft (QB drops out once my QB
+  pick lands, empties to `{}` once all starting slots fill), instead of
+  staying `{all True}` for all 140 cycles.
+- Separately, dug into why the recommendation leaned QB/TE even after
+  that fix (it still did, RB was only recommended 2 of 140 cycles post-
+  fix): confirmed VBD is computed once, statically, from the full
+  pre-draft player pool (`compute_vbd` in vbd.py, called once inside
+  `build_tracker_board` at tracker startup), and never re-baselined as
+  players actually leave the board during a draft. Each player's
+  vbd_value is fixed relative to the *original* replacement level for
+  the entire draft; run_tracker only ever filters drafted players out of
+  the available rows, it never recomputes replacement_level against who
+  is genuinely still on the board. Checked this wasn't just theoretical
+  by pulling real depletion counts from the same completed draft: RB was
+  drafted roughly 3x faster than QB or TE through the first two-thirds
+  of the draft (32 RBs vs. 11 QBs vs. 9 TEs drafted by pick 91), a real
+  ADP-driven early RB run. Static replacement level plus asymmetric real
+  depletion is a complete, code-confirmed explanation on its own: by
+  pick 91 the best available RB's vbd_value had gone negative (-5.6)
+  while QB and TE candidates were still comfortably positive, not
+  because VBD structurally overvalues QB/TE, but because RB's remaining
+  pool is a much worse remnant of its original distribution than QB/TE's
+  remaining pool is of theirs. No streamability argument was needed to
+  explain tonight's log, though whether QB/TE's real-world
+  replaceability *should* factor into the model at all is a separate,
+  legitimate question, not settled here, and not yet acted on.
+- Left open, deliberately, not yet decided: whether the fix for the
+  static-baseline issue is re-baselining replacement level as the pool
+  shrinks, a depletion-aware adjustment, or something else. That's a
+  real design decision, not a bug fix like the roster_id issue was,
+  worth its own planning pass rather than folding into tonight's
+  session.
+- Tonight's dry run is only complete as of the roster_id fix and its
+  replay-verification above; the original live run's own recommendation
+  log (before the fix) is a real artifact of a real bug, not a valid
+  read on the tool's actual roster-need-aware behavior.
