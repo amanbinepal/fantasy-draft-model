@@ -753,3 +753,56 @@ project later: not just what the code does, but why I chose it.
   mechanism correctly reflecting this draft's actual depletion pattern,
   not a new bug, but a real behavior change worth specifically watching
   in the next live run rather than assumed to generalize from one mock.
+
+## 2026-08-19/20: Second mock draft, two more real issues found and fixed
+
+- Ran a second live mock draft (draft_id 1395994446939578368, complete),
+  the "watch it and see what breaks" the first mock's DECISIONS entry
+  said this session still needed. Two real issues, both confirmed
+  against the actual 14 real picks pulled from Sleeper's API afterward,
+  not assumed from the live run alone.
+- `roster_needs()` only ever checked the *combined* RB+WR+TE count
+  against total flex capacity (7), never whether each position's own
+  required count was met along the way. By pick 7 of the real draft
+  (Wan'Dale Robinson), 3 RB + 4 WR = 7 flex-eligible picks had landed
+  with zero TEs, so `flex_capacity_open` flipped to `False` for RB, WR,
+  *and* TE simultaneously, even though the roster structurally requires
+  exactly 1 TE starter. TE was never flagged needed again; it only got
+  drafted at pick 13 by luck, winning that round's unrestricted
+  best-available comparison. Same class of bug `vbd.py`'s
+  `compute_replacement_levels` already caught and fixed in Phase 5 (a
+  deep position crowding out a shallow one's guaranteed floor), just
+  never applied to `recommend.py`'s own roster-need logic until now.
+  Fix: each flex-eligible position's own fixed floor is checked first,
+  only the count beyond that floor competes for the shared FLEX slots.
+  Verified by replaying the real pick sequence: TE now stays flagged
+  needed through pick 12 (previously dropped after pick 7), only
+  clearing once a TE is actually drafted.
+- Separately, once the single QB starting slot filled (pick 9, Trevor
+  Lawrence), `needs` went to all-False for the rest of the draft, and
+  the unrestricted best-available fallback had no ceiling on any
+  position. Nothing stopped QB from winning that comparison twice more
+  (Bo Nix, Jared Goff), real result: 4 QBs drafted. This isn't a bug the
+  way the TE issue was, there was never a "should stop at some count"
+  concept anywhere in the code to begin with. Added `league.draft_caps`
+  to config.yaml (`QB: 2, TE: 2`, matching last season's actual roster
+  construction; RB/WR intentionally left uncapped, real bench/flex value
+  in stacking more of them), and `recommend_next_pick` now excludes a
+  capped position from consideration entirely, in both branches, once
+  its count is reached, regardless of remaining VBD value. Kept separate
+  from `roster_needs` on purpose: `needs` stays purely mechanical
+  (derived straight from the roster shape), a cap is a strategy
+  preference layered on top, not something the roster math implies by
+  itself. The reason string now says explicitly when a position was
+  excluded for being at cap, so a capped position going quiet is never
+  silently unexplained.
+- Verified both together by replaying the real second-draft pick
+  sequence through the fixed code: from the pick after QB hits 2, every
+  recommendation's reason shows `(excluded, at draft cap: QB)`, and TE
+  surfaces as the recommendation instead each time, since it stayed a
+  genuine need under the roster_needs fix. Also re-ran `recommend.py`'s
+  own three `__main__` demo scenarios, still sensible; the "flex
+  capacity full" scenario now correctly shows `TE: False` specifically
+  because that scenario's own TE floor genuinely was met (1 TE, 1
+  required), distinct from the real bug case (0 TE), confirming the fix
+  tells those two situations apart rather than collapsing them.
