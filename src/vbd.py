@@ -77,7 +77,19 @@ def compute_replacement_levels(blended, config):
     replacement = {}
 
     qb = blended[blended["position"] == "QB"].sort_values("blended_points", ascending=False)
-    replacement["QB"] = qb.iloc[fixed["QB"] - 1]["blended_points"]
+    if len(qb) >= fixed["QB"]:
+        replacement["QB"] = qb.iloc[fixed["QB"] - 1]["blended_points"]
+    elif len(qb) > 0:
+        # Fewer QBs available than the league needs (only possible once this
+        # runs against a live, shrinking pool, not the full pre-draft class):
+        # floor at the worst remaining QB's own value, so the survivors'
+        # vbd_value bottoms out near 0 instead of an IndexError against a
+        # count that no longer exists.
+        replacement["QB"] = qb.iloc[-1]["blended_points"]
+    else:
+        # No QBs left on the board at all. No QB rows exist in `blended` to
+        # map this onto either way, so there's nothing for None to break.
+        replacement["QB"] = None
 
     fixed_starters, remaining = {}, {}
     for position in FLEX_ELIGIBLE:
