@@ -28,15 +28,25 @@ def roster_needs(my_positions, config):
 
     qb_needed = counts.get("QB", 0) < roster["QB"]
 
-    flex_eligible_drafted = sum(counts.get(p, 0) for p in FLEX_ELIGIBLE)
-    total_flex_capacity = roster["RB"] + roster["WR"] + roster["TE"] + roster["FLEX"]
-    flex_capacity_open = flex_eligible_drafted < total_flex_capacity
+    # Each flex-eligible position's own fixed floor is a guaranteed
+    # requirement first, not a soft target inside the shared pool: every
+    # team fields exactly 1 TE starter regardless of how many RB/WR are
+    # already rostered. (Real bug this fixes, not theoretical: a real
+    # mock draft closed "flex capacity" with 3 RB + 4 WR and zero TEs,
+    # confirmed against real pick data, before this function ever
+    # flagged TE as needed again.) Only the count *beyond* each
+    # position's own floor competes for the shared FLEX slots, the same
+    # fixed-floor-before-flex-competes pattern vbd.py's
+    # compute_replacement_levels already established.
+    own_floor_met = {p: counts.get(p, 0) >= roster[p] for p in FLEX_ELIGIBLE}
+    extra_flex_eligible_drafted = sum(
+        max(0, counts.get(p, 0) - roster[p]) for p in FLEX_ELIGIBLE
+    )
+    flex_slots_open = extra_flex_eligible_drafted < roster["FLEX"]
 
     return {
         "QB": qb_needed,
-        "RB": flex_capacity_open,
-        "WR": flex_capacity_open,
-        "TE": flex_capacity_open,
+        **{p: (not own_floor_met[p]) or flex_slots_open for p in FLEX_ELIGIBLE},
     }
 
 
