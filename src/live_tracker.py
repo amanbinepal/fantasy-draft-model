@@ -29,6 +29,7 @@ up everything that accumulated since the last one.
 """
 
 import difflib
+import sys
 import time
 
 import pandas as pd
@@ -232,7 +233,18 @@ if __name__ == "__main__":
     board, config = build_tracker_board()
     print(f"Board built: {len(board)} players tracked.")
 
-    draft_id = config["league"]["draft_id"]
+    # Optional CLI override so a mock-draft dry run never has to touch the
+    # real league's draft_id in config.yaml. No arg (draft day) behaves
+    # exactly as before: the real draft_id from config. Printed explicitly
+    # either way, mixing up which draft is live is the one mistake that's
+    # actually dangerous (recommending off the wrong board).
+    if len(sys.argv) > 1:
+        draft_id = sys.argv[1]
+        print(f"Using draft_id: {draft_id} (override)")
+    else:
+        draft_id = config["league"]["draft_id"]
+        print(f"Using draft_id: {draft_id} (from config.yaml)")
+
     my_roster_id = resolve_my_roster_id(config["league"]["sleeper_username"], draft_id)
     print(f"Resolved my roster_id: {my_roster_id}")
 
