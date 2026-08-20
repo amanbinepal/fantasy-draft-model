@@ -98,17 +98,26 @@ def match_pick(pick, available_board):
     return None, "unmatched"
 
 
-def resolve_my_roster_id(username, draft_id):
-    """Resolve a Sleeper username to the roster_id it owns in a specific
-    draft, via user_id -> draft_order -> slot_to_roster_id. Resolved
-    fresh each run rather than hardcoded in config.yaml, so it can't go
-    stale if draft order were ever reset before the draft locks in."""
+def resolve_my_draft_slot(username, draft_id):
+    """Resolve a Sleeper username to its draft_slot in a specific draft,
+    via user_id -> draft_order. Resolved fresh each run rather than
+    hardcoded in config.yaml, so it can't go stale if draft order were
+    ever reset before the draft locks in.
+
+    Matches on draft_slot rather than roster_id (a slot_to_roster_id
+    lookup used to sit here) because roster_id turned out to be null on
+    every single pick in a real mock draft (confirmed directly against
+    1395984031421599744's completed picks), silently breaking the
+    "is this pick mine" check the whole run. draft_slot is present
+    directly on every pick object and stable per team for the entire
+    draft (confirmed: exactly 14 picks, one per round, at the same
+    draft_slot), so it doesn't depend on that broken hop at all."""
     user_id = pull_user_id(username)
     draft_meta = pull_draft_metadata(draft_id)
     my_slot = draft_meta["draft_order"].get(user_id)
     if my_slot is None:
         raise ValueError(f"{username} (user_id {user_id}) not found in this draft's draft_order")
-    return draft_meta["slot_to_roster_id"][str(my_slot)]
+    return my_slot
 
 
 def _print_unresolved(unresolved_picks):
@@ -134,7 +143,7 @@ def _print_recommendation(available, my_positions, config):
     print(f"    Reason: {reason}")
 
 
-def run_tracker(draft_id, board, config, my_roster_id,
+def run_tracker(draft_id, board, config, my_draft_slot,
                  poll_interval=POLL_INTERVAL_SECONDS, max_iterations=None):
     """Poll, diff against last-seen picks, match, shrink the pool, and
     print the roster-need-aware recommendation every cycle.
@@ -184,7 +193,7 @@ def run_tracker(draft_id, board, config, my_roster_id,
                     name = f"{pick['first_name']} {pick['last_name']}"
                     if idx is not None:
                         drafted_indices.add(idx)
-                        if str(pick["roster_id"]) == str(my_roster_id):
+                        if pick["draft_slot"] == my_draft_slot:
                             my_drafted_indices.add(idx)
                         available = available.drop(index=idx)
                         pick_lines.append(
@@ -245,11 +254,11 @@ if __name__ == "__main__":
         draft_id = config["league"]["draft_id"]
         print(f"Using draft_id: {draft_id} (from config.yaml)")
 
-    my_roster_id = resolve_my_roster_id(config["league"]["sleeper_username"], draft_id)
-    print(f"Resolved my roster_id: {my_roster_id}")
+    my_draft_slot = resolve_my_draft_slot(config["league"]["sleeper_username"], draft_id)
+    print(f"Resolved my draft_slot: {my_draft_slot}")
 
     drafted_indices, my_drafted_indices, unresolved_picks = run_tracker(
-        draft_id, board, config, my_roster_id
+        draft_id, board, config, my_draft_slot
     )
 
     print()
