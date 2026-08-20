@@ -160,7 +160,7 @@ def _print_recommendation(available, my_positions, config):
     values (recompute_dynamic_vbd); the static figure is shown alongside
     since the pre-draft number is still worth seeing, not just the live
     one."""
-    top, needs, reason = recommend_next_pick(available, my_positions, config)
+    top, needs, reason, alternative = recommend_next_pick(available, my_positions, config)
     print("*** RECOMMENDED NEXT PICK ***")
     if top is not None:
         print(
@@ -171,6 +171,14 @@ def _print_recommendation(available, my_positions, config):
         if top.get("on_watchlist"):
             note = f": {top['watchlist_note']}" if top["watchlist_note"] else ""
             print(f"    /!\\ ON YOUR WATCHLIST{note}")
+            if alternative is not None:
+                print(
+                    f"    Instead, consider: {alternative['player_display_name']} "
+                    f"({alternative['position']}), vbd_value={alternative['vbd_value']:.1f} "
+                    f"(static {alternative['static_vbd_value']:.1f}), tier {alternative['tier']}"
+                )
+            else:
+                print("    No non-watchlisted alternative among current candidates.")
     print(f"    Reason: {reason}")
 
 

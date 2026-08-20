@@ -52,7 +52,13 @@ def roster_needs(my_positions, config):
 
 def recommend_next_pick(available_board, my_positions, config):
     """Recommend the best-value player among still-eligible positions.
-    Returns (recommended_row_or_None, needs_dict, reason_string).
+    Returns (recommended_row_or_None, needs_dict, reason_string,
+    alternative_row_or_None). `alternative` is only ever set when `top`
+    is on the watchlist: the next-best candidate under the exact same
+    rules (caps, deprioritization, needed-position scope) that isn't
+    flagged, answering "so who instead" rather than leaving that as a
+    manual lookup mid-draft. `None` when `top` isn't watchlisted, or
+    when every remaining candidate happens to be too.
 
     Ranking is unified around each position's own floor status, not a
     needed-vs-fallback branch split: a position uses dynamic vbd_value
@@ -131,7 +137,7 @@ def recommend_next_pick(available_board, my_positions, config):
         reason += f" (deprioritized until pick {soonest}: {', '.join(sorted(deprioritized))})"
 
     if len(candidate_pool) == 0:
-        return None, needs, "no eligible players left on the board"
+        return None, needs, "no eligible players left on the board", None
 
     candidate_pool = candidate_pool.copy()
     is_floor_met = candidate_pool["position"].map(floor_met).fillna(True)
@@ -142,8 +148,20 @@ def recommend_next_pick(available_board, my_positions, config):
     else:
         candidate_pool["_effective_value"] = candidate_pool["vbd_value"]
 
-    top = candidate_pool.sort_values("_effective_value", ascending=False).iloc[0]
-    return top, needs, reason
+    candidate_pool = candidate_pool.sort_values("_effective_value", ascending=False)
+    top = candidate_pool.iloc[0]
+
+    # A watchlist hit answers "be wary" but not "so who instead": find
+    # the next-best candidate under the exact same rules (same caps,
+    # same deprioritization, same needed-position scope) that isn't
+    # flagged, rather than leaving that as a manual lookup mid-draft.
+    alternative = None
+    if top.get("on_watchlist"):
+        non_watchlist = candidate_pool[~candidate_pool["on_watchlist"]]
+        if len(non_watchlist) > 0:
+            alternative = non_watchlist.iloc[0]
+
+    return top, needs, reason, alternative
 
 
 if __name__ == "__main__":
@@ -172,11 +190,16 @@ if __name__ == "__main__":
     for label, my_positions in scenarios.items():
         print()
         print(f"=== Scenario: {label} ===")
-        top, needs, reason = recommend_next_pick(board, my_positions, config)
+        top, needs, reason, alternative = recommend_next_pick(board, my_positions, config)
         print(f"needs: {needs}")
         if top is not None:
             print(
                 f"recommended: {top['player_display_name']} ({top['position']}), "
                 f"vbd_value={top['vbd_value']:.1f}, tier {top['tier']}"
+            )
+        if alternative is not None:
+            print(
+                f"  (on watchlist, alternative: {alternative['player_display_name']} "
+                f"({alternative['position']}))"
             )
         print(f"reason: {reason}")
