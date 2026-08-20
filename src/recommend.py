@@ -54,16 +54,36 @@ def recommend_next_pick(available_board, my_positions, config):
     """Filter to still-needed positions, recommend the highest-VBD
     player among them. Falls back to best-available on the whole board
     if no starting need remains. Returns (recommended_row_or_None,
-    needs_dict, reason_string)."""
+    needs_dict, reason_string).
+
+    draft_caps (config.yaml, league.draft_caps, e.g. {"QB": 2}) exclude
+    a position from consideration entirely, in both branches below, once
+    its count is reached, regardless of remaining VBD value: a strategy
+    preference (last season's own roster construction), not something
+    derivable from the roster shape the way `needs` is, so kept as a
+    separate, explicit filtering step rather than folded into
+    roster_needs itself."""
     needs = roster_needs(my_positions, config)
-    needed_positions = [position for position, needed in needs.items() if needed]
+    counts = {}
+    for position in my_positions:
+        counts[position] = counts.get(position, 0) + 1
+    caps = config["league"].get("draft_caps", {})
+    at_cap = {position for position, cap in caps.items() if counts.get(position, 0) >= cap}
+
+    eligible_board = available_board[~available_board["position"].isin(at_cap)]
+    needed_positions = [
+        position for position, needed in needs.items() if needed and position not in at_cap
+    ]
 
     if needed_positions:
-        candidates = available_board[available_board["position"].isin(needed_positions)]
+        candidates = eligible_board[eligible_board["position"].isin(needed_positions)]
         reason = f"starting slot(s) still open at: {', '.join(needed_positions)}"
     else:
-        candidates = available_board
+        candidates = eligible_board
         reason = "all starting slots filled, best player available (bench/depth value)"
+
+    if at_cap:
+        reason += f" (excluded, at draft cap: {', '.join(sorted(at_cap))})"
 
     if len(candidates) == 0:
         return None, needs, "no eligible players left on the board"

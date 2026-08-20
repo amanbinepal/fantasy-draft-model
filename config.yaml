@@ -15,6 +15,14 @@ league:
     BN: 6
     IR: 2
   rounds: 14
+  # Draft-day preference, not derived from the roster shape above: max
+  # players to draft at a position, regardless of remaining VBD value.
+  # Positions omitted here are uncapped (RB/WR: real bench/flex value
+  # in stacking more of them). Matches last season's actual roster
+  # construction (2 QB, 2 TE).
+  draft_caps:
+    QB: 2
+    TE: 2
 
 data:
   seasons: [2019, 2020, 2021, 2022, 2023, 2024, 2025]
