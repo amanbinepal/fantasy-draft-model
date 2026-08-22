@@ -7,6 +7,7 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/raw/fantasypros_ecr.csv
 .env
 .DS_Store
 .ipynb_checkpoints/
